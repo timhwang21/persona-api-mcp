@@ -7,9 +7,7 @@
   "scripts": {
     "setup-symlink": "[ -L openapi ] || ln -sf ../persona-web/openapi/external openapi",
     "extract-tags": "node scripts/extract-tags.js",
-    "generate-types": "node scripts/generate-types.js",
-    "generate": "npm run setup-symlink && npm run extract-tags && npm run generate-types",
-    "prebuild": "npm run generate",
+    "prebuild": "npm run setup-symlink && npm run extract-tags",
     "build": "tsc",
     "dev": "tsx --watch src/server/index.ts",
     "start": "node dist/server/index.js",

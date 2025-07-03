@@ -204,34 +204,3 @@ export function toolExists(name: string): boolean {
   return getTool(name) !== null;
 }
 
-/**
- * Get tools for specific resource types
- */
-export function getInquiryTools(): any[] {
-  return getToolsByTag('Inquiries');
-}
-
-export function getAccountTools(): any[] {
-  return getToolsByTag('Accounts');
-}
-
-export function getCaseTools(): any[] {
-  return getToolsByTag('Cases');
-}
-
-export function getVerificationTools(): any[] {
-  return getToolsByTag('Verifications');
-}
-
-export function getReportTools(): any[] {
-  return getToolsByTag('Reports');
-}
-
-export function getTransactionTools(): any[] {
-  return getToolsByTag('Transactions');
-}
-
-export function getDeviceTools(): any[] {
-  return getToolsByTag('Devices');
-}
-

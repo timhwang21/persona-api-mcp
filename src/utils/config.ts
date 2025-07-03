@@ -17,44 +17,30 @@ const __dirname = dirname(__filename);
 // current directory would be in dist/server
 config({ path: join(__dirname, '../../.env') });
 
-/**
- * Configuration schema validation using Zod
- */
 const ConfigSchema = z.object({
-  // Persona API Configuration
   persona: z.object({
     apiKey: z.string().min(1, 'Persona API key is required'),
     apiUrl: z.string().url().default('http://localhost:3000/api/v1'),
-    timeout: z.number().positive().default(30000), // 30 seconds
+    timeout: z.number().positive().default(30000),
     retries: z.number().min(0).default(3),
-    retryDelay: z.number().positive().default(1000), // 1 second
+    retryDelay: z.number().positive().default(1000),
   }),
-
-  // Server Configuration
   server: z.object({
     name: z.string().default('persona-api-mcp'),
     version: z.string().default('1.0.0'),
     description: z.string().default('MCP server for Persona API integration'),
   }),
-
-
-  // Logging Configuration
   logging: z.object({
     level: z.enum(['debug', 'info', 'warn', 'error']).default('info'),
     format: z.enum(['json', 'text']).default('json'),
     enableRequestLogging: z.boolean().default(true),
   }),
-
-  // Environment Configuration
   environment: z.enum(['development', 'production', 'test']).default('development'),
 });
 
 export type Config = z.infer<typeof ConfigSchema>;
 
-/**
- * Load configuration from environment variables and defaults
- */
-export function loadConfig(): Config {
+function loadConfig(): Config {
   const rawConfig = {
     persona: {
       apiKey: process.env.PERSONA_API_KEY || '',
@@ -87,24 +73,15 @@ export function loadConfig(): Config {
   }
 }
 
-/**
- * Validate that all required configuration is present
- */
 export function validateConfig(config: Config): void {
   if (!config.persona.apiKey) {
     throw new Error('PERSONA_API_KEY environment variable is required');
   }
-
-  // Additional validation logic can be added here
   if (config.environment === 'production' && config.logging.level === 'debug') {
-    // Use stderr for warnings to avoid interfering with MCP stdio protocol
     console.error('WARNING: Debug logging is enabled in production environment');
   }
 }
 
-/**
- * Get the current configuration instance
- */
 let configInstance: Config | null = null;
 
 export function getConfig(): Config {
@@ -115,9 +92,3 @@ export function getConfig(): Config {
   return configInstance;
 }
 
-/**
- * Reset configuration (useful for testing)
- */
-export function resetConfig(): void {
-  configInstance = null;
-}

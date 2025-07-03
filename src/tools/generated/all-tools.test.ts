@@ -6,7 +6,7 @@
  */
 
 import { describe, it, expect, beforeAll, vi } from 'vitest';
-import { initializeAllTools, getAllTools, getAllToolDefinitions, toolExists, getInquiryTools } from './all-tools.js';
+import { initializeAllTools, getAllTools, getAllToolDefinitions } from './all-tools.js';
 import path from 'path';
 import fs from 'fs';
 import { fileURLToPath } from 'url';

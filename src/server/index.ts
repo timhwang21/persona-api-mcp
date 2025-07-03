@@ -171,7 +171,14 @@ async function main(): Promise<void> {
         update: 'account_update, inquiry_update, transaction_update, etc.',
         redact: 'account_redact, inquiry_redact (permanent PII deletion)',
         actions: 'account_add_tag, inquiry_approve, report_dismiss, webhook_rotate_secret, etc.',
-        note: 'All tools auto-generated from OpenAPI - supports every Persona API operation'
+        note: 'All tools auto-generated from OpenAPI - supports every Persona API operation',
+        parameterGuide: {
+          format: 'Pass ONLY the actual attribute values as individual fields',
+          structure: 'Do NOT wrap in "data" or "attributes" - MCP handles API structure automatically',
+          naming: 'Use camelCase (e.g., inquiryTemplateId, not inquiry-template-id)',
+          ids: 'ID formats: inq_xxx (inquiries), acc_xxx (accounts), itmpl_xxx (templates)',
+          reference: 'Check openapi://openapi.yaml for detailed parameter schemas'
+        }
       },
       
       // Built-in prompts for AI assistance
@@ -183,9 +190,12 @@ async function main(): Promise<void> {
       
       examples: {
         read_data: 'Ask: "Show me the last 5 inquiries" (uses resources)',
-        create: 'Ask: "Create a new inquiry with template itmpl_xxx" (uses tools)', 
-        update: 'Ask: "Update account acc_123 email to new@email.com" (uses tools)',
-        analyze: 'Ask: "Analyze inquiry inq_456 for compliance issues" (uses prompts)'
+        create_correct: 'inquiry_create with {inquiryTemplateId: "itmpl_xxx", fields: {nameFirst: "John", nameLast: "Doe"}} - user data in fields!',
+        update_correct: 'account_update with {accountId: "acc_123", email: "new@email.com"} - just the attributes!',
+        analyze: 'Ask: "Analyze inquiry inq_456 for compliance issues" (uses prompts)',
+        wrong_data_string: 'WRONG: {data: "{\\"inquiryTemplateId\\": \\"itmpl_xxx\\"}"}',
+        wrong_data_object: 'WRONG: {data: {attributes: {inquiryTemplateId: "itmpl_xxx"}}}',
+        explanation: 'The MCP automatically wraps your parameters in {data: {attributes: {your_params}}} format'
       }
     });
 

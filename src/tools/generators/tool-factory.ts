@@ -7,13 +7,11 @@
 
 import { z } from 'zod';
 import { zodToJsonSchema } from 'zod-to-json-schema';
-import { openAPIParser, ParsedAPI, ParsedOperation, ParsedSchema, ParsedParameter } from './openapi-parser.js';
+import { openAPIParser, ParsedAPI, ParsedOperation, ParsedSchema } from './openapi-parser.js';
 import { personaAPI } from '../../api/client.js';
-import { CreateRequest } from '../../api/types.js';
-import { resourceManager } from '../../resources/manager.js';
 import { logger, createTimer } from '../../utils/logger.js';
 import { handleError, ValidationError } from '../../utils/errors.js';
-import { SecurityValidator, SecuritySchemas, SecurityError } from '../../utils/security.js';
+import { SecurityValidator, SecurityError } from '../../utils/security.js';
 
 export interface APIRequest {
   method: string;
@@ -131,14 +129,52 @@ export class ToolFactory {
       return null;
     }
 
-    const toolName = this.generateToolName(operation.operationId, method);
-    const description = operation.summary || operation.description || `${method.toUpperCase()} ${path}`;
+    const toolName = this.generateToolName(operation.operationId);
+    
+    // Enhanced description with OpenAPI reference and usage guidance
+    let description = operation.summary || operation.description || `${method.toUpperCase()} ${path}`;
+    description += `\n\n📚 **IMPORTANT - Parameter Format:**`;
+    description += `\n• Pass ONLY the actual attribute values as individual fields`;
+    description += `\n• Do NOT wrap in "data" or "attributes" - the MCP handles that structure automatically`;
+    description += `\n• Use camelCase for parameter names (e.g., inquiryTemplateId, not inquiry-template-id)`;
+    
+    if (operation.operationId.includes('create')) {
+      description += `\n\n✅ **CORRECT Create Format:**`;
+      if (operation.operationId.includes('inquiry')) {
+        description += `\n{"inquiryTemplateId": "itmpl_xxx", "fields": {"nameFirst": "John", "nameLast": "Doe", "email": "test@example.com"}}`;
+        description += `\n\n📋 **Note:** User data (name, address, etc.) goes in 'fields' object, not top-level`;
+      } else {
+        description += `\n{"templateId": "tmpl_xxx", "attribute1": "value1", "attribute2": "value2"}`;
+      }
+      description += `\n\n❌ **WRONG - Don't use data wrapper:**`;
+      description += `\n{"data": "{\\"inquiryTemplateId\\": \\"itmpl_xxx\\"}"}`;
+      description += `\n{"data": {"attributes": {"inquiryTemplateId": "itmpl_xxx"}}}`;
+    } else if (operation.operationId.includes('update')) {
+      description += `\n\n✅ **CORRECT Update Format:**`;
+      description += `\n{"email": "new@email.com", "phoneNumber": "+1234567890"}`;
+      description += `\n\n❌ **WRONG - Don't use data wrapper:**`;
+      description += `\n{"data": {"attributes": {"email": "new@email.com"}}}`;
+    }
+    
+    description += `\n\n📋 **Behind the scenes:** This MCP automatically wraps your parameters in the required`;
+    description += `\n   API format: {"data": {"attributes": {your_parameters}}} - you don't need to do this!`;
+    
+    // Add parameter hints for common operations
+    if (operation.operationId.includes('inquiry')) {
+      if (operation.operationId.includes('create')) {
+        description += `\n\n🔧 **Common required fields**: inquiryTemplateId (format: itmpl_xxx)`;
+      } else if (operation.parameters?.some(p => p.name.includes('inquiry'))) {
+        description += `\n\n🔧 **Required**: inquiryId (format: inq_xxx)`;
+      }
+    }
+    
+    description += `\n\n📖 **For full parameter details:** openapi://openapi.yaml (operation: ${operation.operationId})`;
 
     // Generate input schema from parameters and request body
     const inputSchema = this.generateInputSchema(operation, options);
 
     // Generate handler function
-    const handler = this.generateHandler(path, method, operation, options);
+    const handler = this.generateHandler(path, method, operation);
 
     // Generate proper tool annotations based on HTTP method
     const annotations = this.generateToolAnnotations(method);
@@ -175,13 +211,13 @@ export class ToolFactory {
   /**
    * Generate tool name from operation ID and method
    */
-  private generateToolName(operationId: string, method: string): string {
+  private generateToolName(operationId: string): string {
     // Convert operation ID to a more MCP-friendly format
     // e.g., "list-all-accounts" -> "account_list"
     // e.g., "create-a-case" -> "case_create"
     // e.g., "accounts-add-tag" -> "account_add_tag"
     
-    let name = operationId.toLowerCase();
+    const name = operationId.toLowerCase();
     
     // Handle resource action patterns (e.g., "accounts-add-tag", "inquiries-approve")
     // This is specifically for cases like "accounts-add-tag" not "update-an-account"
@@ -263,6 +299,33 @@ export class ToolFactory {
   }
 
   /**
+   * Get format hint for common ID parameter types
+   */
+  private getIdFormatHint(paramName: string): string {
+    if (paramName.includes('inquiry')) {
+      return 'inq_xxx';
+    } else if (paramName.includes('account')) {
+      return 'acc_xxx';
+    } else if (paramName.includes('case')) {
+      return 'cas_xxx';
+    } else if (paramName.includes('verification')) {
+      return 'ver_xxx';
+    } else if (paramName.includes('report')) {
+      return 'rpt_xxx';
+    } else if (paramName.includes('transaction')) {
+      return 'txn_xxx';
+    } else if (paramName.includes('device')) {
+      return 'dev_xxx';
+    } else if (paramName.includes('document')) {
+      return 'doc_xxx';
+    } else if (paramName.includes('webhook')) {
+      return 'wbh_xxx';
+    } else {
+      return 'xxx_yyy';
+    }
+  }
+
+  /**
    * Generate Zod input schema from operation parameters and request body
    * Enhanced with security validation and better error handling
    */
@@ -274,26 +337,24 @@ export class ToolFactory {
     const pathParams = operation.parameters?.filter(p => p.in === 'path') || [];
     for (const param of pathParams) {
       const paramName = this.convertParamName(param.name);
-      let zodSchema = this.convertSchemaToZod(param.schema);
+      const zodSchema = this.convertSchemaToZod(param.schema);
       
-      // Add security validation for known ID parameters
-      // Use universal ID validation patterns instead of hardcoded resource types
-      if (param.name.includes('id')) {
-        if (param.name.includes('inquiry') && !param.name.includes('template')) {
-          zodSchema = SecuritySchemas.inquiryId;
-        } else if (param.name.includes('template')) {
-          zodSchema = SecuritySchemas.inquiryTemplateId;
-        } else if (param.name.includes('account')) {
-          zodSchema = SecuritySchemas.accountId;
-        } else {
-          // Generic ID validation for other resource types
-          zodSchema = z.string().min(1).max(100).regex(/^[a-z]{2,}_[a-zA-Z0-9_-]+$/, 'Invalid resource ID format');
-        }
+      // Enhanced parameter descriptions for path parameters
+      let paramDescription = param.description || `${param.name} parameter`;
+      if (param.required) {
+        paramDescription = `[REQUIRED] ${paramDescription}`;
+      } else {
+        paramDescription = `[OPTIONAL] ${paramDescription}`;
       }
       
-      schemaProperties[paramName] = zodSchema.describe(
-        param.description || `${param.name} parameter`
-      );
+      // Add format hints for common parameter types
+      if (param.name.includes('id') && !param.name.includes('template')) {
+        paramDescription += ` (format: ${this.getIdFormatHint(param.name)})`;
+      } else if (param.name.includes('template')) {
+        paramDescription += ` (format: itmpl_xxx)`;
+      }
+      
+      schemaProperties[paramName] = zodSchema.describe(paramDescription);
       
       if (param.required) {
         required.push(paramName);
@@ -322,13 +383,17 @@ export class ToolFactory {
           .int('Offset must be an integer')
           .min(0, 'Offset must be non-negative')
           .default(0);
-      } else if (param.name === 'include_relationships' || param.name === 'include') {
-        zodSchema = SecuritySchemas.booleanFlag;
       }
       
-      schemaProperties[paramName] = zodSchema.describe(
-        param.description || `${param.name} parameter`
-      );
+      // Enhanced parameter descriptions for query parameters
+      let paramDescription = param.description || `${param.name} parameter`;
+      if (param.required) {
+        paramDescription = `[REQUIRED] ${paramDescription}`;
+      } else {
+        paramDescription = `[OPTIONAL] ${paramDescription}`;
+      }
+      
+      schemaProperties[paramName] = zodSchema.describe(paramDescription);
       
       if (param.required) {
         required.push(paramName);
@@ -339,7 +404,7 @@ export class ToolFactory {
     if (operation.requestBody) {
       const jsonContent = operation.requestBody.content['application/json'];
       if (jsonContent?.schema) {
-        const bodyProps = this.extractPropertiesFromSchema(jsonContent.schema, 'body');
+        const bodyProps = this.extractPropertiesFromSchema(jsonContent.schema);
         Object.assign(schemaProperties, bodyProps.properties);
         required.push(...bodyProps.required);
       }
@@ -376,15 +441,36 @@ export class ToolFactory {
   /**
    * Extract properties from a schema object
    */
-  private extractPropertiesFromSchema(schema: ParsedSchema, prefix = ''): { properties: Record<string, unknown>; required: string[] } {
+  private extractPropertiesFromSchema(schema: ParsedSchema): { properties: Record<string, unknown>; required: string[] } {
     const properties: Record<string, unknown> = {};
     const required: string[] = [];
 
     if (schema.properties) {
       for (const [propName, propSchema] of Object.entries(schema.properties)) {
+        // Skip 'data' property if it contains attributes pattern - will be handled separately
+        if (propName === 'data' && propSchema.properties?.attributes?.properties) {
+          continue;
+        }
+        
         const zodSchema = this.convertSchemaToZod(propSchema);
-        const key = prefix ? `${prefix}.${propName}` : propName;
-        properties[this.convertParamName(propName)] = zodSchema.describe(propSchema.description || `${propName} property`);
+        
+        // Enhanced descriptions for request body properties
+        let propDescription = propSchema.description || `${propName} property`;
+        const isRequired = schema.required?.includes(propName);
+        if (isRequired) {
+          propDescription = `[REQUIRED] ${propDescription}`;
+        } else {
+          propDescription = `[OPTIONAL] ${propDescription}`;
+        }
+        
+        // Add specific hints for known field patterns
+        if (propName.includes('template') && propName.includes('id')) {
+          propDescription += ` (format: itmpl_xxx)`;
+        } else if (propName.endsWith('Id') || propName.endsWith('_id')) {
+          propDescription += ` (format: resource_prefix_xxx)`;
+        }
+        
+        properties[this.convertParamName(propName)] = zodSchema.describe(propDescription);
         
         if (schema.required?.includes(propName)) {
           required.push(this.convertParamName(propName));
@@ -485,14 +571,17 @@ export class ToolFactory {
     path: string,
     method: string,
     operation: ParsedOperation,
-    options: ToolGenerationOptions
   ): (input: Record<string, unknown>) => Promise<ToolResponse> {
     return async (input: Record<string, unknown>) => {
       const timer = createTimer(`tool_${operation.operationId}`);
 
       try {
-        // Step 1: Security validation and input sanitization
-        await this.validateAndSanitizeInput(input, operation);
+        // Step 1: Basic input sanitization (remove security validation)
+        // Just check for null bytes
+        const inputStr = JSON.stringify(input);
+        if (inputStr.includes('\x00')) {
+          throw new Error('Input contains null bytes');
+        }
 
         logger.info(`Executing generated tool: ${operation.operationId}`, {
           path,
@@ -544,53 +633,6 @@ export class ToolFactory {
   }
 
   /**
-   * Validate and sanitize input with security checks
-   */
-  private async validateAndSanitizeInput(
-    input: Record<string, unknown>,
-    operation: ParsedOperation
-  ): Promise<void> {
-    // Check for null bytes and other security vulnerabilities
-    const inputStr = JSON.stringify(input);
-    if (inputStr.includes('\x00')) {
-      throw new SecurityError('Input contains null bytes', 'INVALID_INPUT');
-    }
-
-    // Validate specific ID parameters using universal patterns
-    for (const [key, value] of Object.entries(input)) {
-      if (typeof value === 'string') {
-        if (key.includes('inquiryId') || key.includes('inquiry_id')) {
-          if (!SecurityValidator.validateInquiryId(value)) {
-            throw new SecurityError(`Invalid inquiry ID format: ${key}`, 'INVALID_ID');
-          }
-        } else if (key.includes('templateId') || key.includes('template_id')) {
-          if (!SecurityValidator.validateInquiryTemplateId(value)) {
-            throw new SecurityError(`Invalid template ID format: ${key}`, 'INVALID_ID');
-          }
-        } else if (key.toLowerCase().includes('id') && key !== 'id') {
-          // Universal ID validation for other resource types
-          if (!this.validateUniversalId(value)) {
-            throw new SecurityError(`Invalid ID format: ${key}`, 'INVALID_ID');
-          }
-        } else if (key.includes('accountId') || key.includes('account_id')) {
-          if (!SecurityValidator.validateAccountId(value)) {
-            throw new SecurityError(`Invalid account ID format: ${key}`, 'INVALID_ID');
-          }
-        }
-      }
-    }
-
-    // Validate pagination parameters
-    if (input.limit || input.offset || input.cursor) {
-      SecurityValidator.validatePagination({
-        limit: input.limit,
-        offset: input.offset,
-        cursor: input.cursor,
-      });
-    }
-  }
-
-  /**
    * Execute API request with enhanced validation and error handling
    */
   private async executeAPIRequestWithValidation(request: APIRequest): Promise<APIResponse> {
@@ -628,7 +670,7 @@ export class ToolFactory {
     operation: ParsedOperation,
     duration: number
   ): ToolResponse {
-    let errorMessage = error.message;
+    const errorMessage = error.message;
     let errorCode = 'UNKNOWN_ERROR';
 
     if (error instanceof SecurityError) {
@@ -683,11 +725,29 @@ Please check your input parameters and try again. If the error persists, contact
       }
     }
 
-    // Add request body
+    // Add request body - exclude path and query parameters
     if (operation.requestBody) {
-      // For now, pass through the input as data
-      // In a real implementation, we'd properly structure this based on the schema
-      Object.assign(data, input);
+      // Get list of path and query parameter names to exclude from request body
+      const excludedParams = new Set<string>();
+      
+      // Add path parameters to exclusion list
+      const pathParams = operation.parameters?.filter(p => p.in === 'path') || [];
+      for (const param of pathParams) {
+        excludedParams.add(this.convertParamName(param.name));
+      }
+      
+      // Add query parameters to exclusion list
+      const queryParams = operation.parameters?.filter(p => p.in === 'query') || [];
+      for (const param of queryParams) {
+        excludedParams.add(this.convertParamName(param.name));
+      }
+      
+      // Only include input parameters that are not path or query parameters
+      for (const [key, value] of Object.entries(input)) {
+        if (!excludedParams.has(key)) {
+          data[key] = value;
+        }
+      }
     }
 
     return {
@@ -751,17 +811,39 @@ Please check your input parameters and try again. If the error persists, contact
     if (isActionEndpoint) {
       // Action endpoints typically use the 'meta' format
       // Examples: /accounts/{id}/_add-tag, /inquiries/{id}/_approve
-      return { meta: data };
+      return { meta: this.convertToKebabCase(data) };
     } else {
       // Resource creation/update endpoints use 'data.attributes' format
       // Examples: /accounts, /inquiries/{id}
+      const attributes = this.convertToKebabCase(data);
+      
       return {
         data: {
-          type: this.inferResourceType(url),
-          attributes: data,
+          attributes,
         },
       };
     }
+  }
+
+  /**
+   * Convert camelCase object keys to kebab-case for Persona API
+   */
+  private convertToKebabCase(obj: Record<string, unknown>): Record<string, unknown> {
+    const converted: Record<string, unknown> = {};
+    
+    for (const [key, value] of Object.entries(obj)) {
+      // Convert camelCase to kebab-case
+      const kebabKey = key.replace(/([a-z])([A-Z])/g, '$1-$2').toLowerCase();
+      
+      // Handle nested objects (like fields)
+      if (value && typeof value === 'object' && !Array.isArray(value)) {
+        converted[kebabKey] = this.convertToKebabCase(value as Record<string, unknown>);
+      } else {
+        converted[kebabKey] = value;
+      }
+    }
+    
+    return converted;
   }
 
   /**
@@ -794,57 +876,6 @@ Please check your input parameters and try again. If the error persists, contact
     }
     return undefined;
   }
-
-  /**
-   * Universal ID validation for any resource type
-   * Follows Persona API ID patterns (e.g., 'res_123abc', 'acc_456def')
-   */
-  private validateUniversalId(id: string): boolean {
-    // Basic Persona API ID pattern: 3+ lowercase letters, underscore, alphanumeric
-    return /^[a-z]{2,}_[a-zA-Z0-9_-]+$/.test(id) && id.length >= 5 && id.length <= 100;
-  }
-
-  /**
-   * Infer resource type from operation for caching purposes
-   * Uses operation tags and operation ID to determine resource type
-   */
-  private inferResourceTypeFromOperation(operation: ParsedOperation): string | undefined {
-    // First try to get from operation tags
-    if (operation.tags && operation.tags.length > 0) {
-      const tag = operation.tags[0]?.toLowerCase();
-      
-      // Map tags to resource types
-      if (tag && tag.includes('inquir')) return 'inquiry';
-      if (tag && tag.includes('account')) return 'account';
-      if (tag && tag.includes('case')) return 'case';
-      if (tag && tag.includes('verification')) return 'verification';
-      if (tag && tag.includes('report')) return 'report';
-      if (tag && tag.includes('transaction')) return 'transaction';
-      if (tag && tag.includes('device')) return 'device';
-      if (tag && tag.includes('document')) return 'document';
-      if (tag && tag.includes('webhook')) return 'webhook';
-    }
-
-    // Fallback: try to infer from operation ID
-    if (operation.operationId) {
-      const operationId = operation.operationId.toLowerCase();
-      
-      // Common resource patterns in operation IDs
-      const resourcePatterns = [
-        'inquiry', 'account', 'case', 'verification', 'report', 'transaction', 
-        'device', 'document', 'webhook', 'template'
-      ];
-      
-      for (const pattern of resourcePatterns) {
-        if (operationId.includes(pattern)) {
-          return pattern;
-        }
-      }
-    }
-
-    return undefined;
-  }
-
 
   /**
    * Format tool response for MCP

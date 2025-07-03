@@ -18,9 +18,6 @@ import {
   isAPIErrorResponse,
 } from './types.js';
 
-/**
- * Persona API Client class
- */
 export class PersonaAPIClient {
   private readonly axiosInstance: AxiosInstance;
   private readonly config = getConfig();
@@ -35,9 +32,6 @@ export class PersonaAPIClient {
     this.setupInterceptors();
   }
 
-  /**
-   * Get default headers for API requests
-   */
   private getDefaultHeaders(): Record<string, string> {
     return {
       'Authorization': `Bearer ${this.config.persona.apiKey}`,
@@ -47,11 +41,7 @@ export class PersonaAPIClient {
     };
   }
 
-  /**
-   * Setup request/response interceptors for logging and error handling
-   */
   private setupInterceptors(): void {
-    // Request interceptor
     this.axiosInstance.interceptors.request.use(
       (config) => {
         const timer = createTimer('api_request');
@@ -72,7 +62,6 @@ export class PersonaAPIClient {
       }
     );
 
-    // Response interceptor
     this.axiosInstance.interceptors.response.use(
       (response) => {
         const timer = (response.config as any).metadata?.timer;
@@ -100,15 +89,11 @@ export class PersonaAPIClient {
           errorData: error.response?.data,
         });
         
-        // Transform axios error to PersonaAPIError
         throw this.transformError(error);
       }
     );
   }
 
-  /**
-   * Sanitize headers for logging (remove sensitive information)
-   */
   private sanitizeHeaders(headers: Record<string, any>): Record<string, any> {
     const sanitized = { ...headers };
     if (sanitized.Authorization) {
@@ -117,12 +102,8 @@ export class PersonaAPIClient {
     return sanitized;
   }
 
-  /**
-   * Transform axios error to PersonaAPIError
-   */
   private transformError(error: any): PersonaAPIError {
     if (error.response) {
-      // Server responded with error status
       const { status, data } = error.response;
       
       if (isAPIErrorResponse(data)) {
@@ -140,7 +121,6 @@ export class PersonaAPIClient {
         );
       }
     } else if (error.request) {
-      // Request was made but no response received
       return new PersonaAPIError(
         'Network error: No response received from server',
         0,
@@ -148,7 +128,6 @@ export class PersonaAPIClient {
         'NETWORK_ERROR'
       );
     } else {
-      // Something else happened
       return new PersonaAPIError(
         `Request error: ${error.message}`,
         0,
@@ -158,9 +137,6 @@ export class PersonaAPIClient {
     }
   }
 
-  /**
-   * Build query parameters from object
-   */
   private buildQueryParams(params: QueryParams): Record<string, string> {
     const queryParams: Record<string, string> = {};
     
@@ -177,17 +153,10 @@ export class PersonaAPIClient {
     return queryParams;
   }
 
-  /**
-   * Generate idempotency key for requests
-   */
   private generateIdempotencyKey(): string {
     return `${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
   }
 
-  /**
-   * Generic method to make API requests
-   * This is the core method that all other operations should use
-   */
   async makeRequest<T = any>(config: {
     method: HTTPMethod;
     url: string;
@@ -228,9 +197,6 @@ export class PersonaAPIClient {
     );
   }
 
-  /**
-   * Generic GET request
-   */
   async get<T = any>(url: string, params?: QueryParams, headers?: Record<string, string>): Promise<T> {
     const config: any = {
       method: 'GET',
@@ -243,9 +209,6 @@ export class PersonaAPIClient {
     return this.makeRequest<T>(config);
   }
 
-  /**
-   * Generic POST request
-   */
   async post<T = any>(
     url: string, 
     data?: any, 
@@ -257,7 +220,6 @@ export class PersonaAPIClient {
     if (idempotencyKey) {
       requestHeaders['Idempotency-Key'] = idempotencyKey;
     } else if (data) {
-      // Generate idempotency key for data-modifying operations
       requestHeaders['Idempotency-Key'] = this.generateIdempotencyKey();
     }
 
@@ -273,9 +235,6 @@ export class PersonaAPIClient {
     return this.makeRequest<T>(config);
   }
 
-  /**
-   * Generic PATCH request
-   */
   async patch<T = any>(
     url: string, 
     data: any, 
@@ -300,9 +259,6 @@ export class PersonaAPIClient {
     return this.makeRequest<T>(config);
   }
 
-  /**
-   * Generic PUT request
-   */
   async put<T = any>(
     url: string, 
     data: any, 
@@ -321,9 +277,6 @@ export class PersonaAPIClient {
     return this.makeRequest<T>(config);
   }
 
-  /**
-   * Generic DELETE request
-   */
   async delete<T = any>(url: string, params?: QueryParams, headers?: Record<string, string>): Promise<T> {
     const config: any = {
       method: 'DELETE',
@@ -336,12 +289,8 @@ export class PersonaAPIClient {
     return this.makeRequest<T>(config);
   }
 
-  /**
-   * Health check method
-   */
   async healthCheck(): Promise<{ status: 'ok'; timestamp: string }> {
     try {
-      // Try a simple GET request to check API connectivity
       await this.get('/inquiries', { 'page[size]': 1 });
       return {
         status: 'ok',
@@ -355,7 +304,4 @@ export class PersonaAPIClient {
 
 }
 
-/**
- * Global API client instance
- */
 export const personaAPI = new PersonaAPIClient();

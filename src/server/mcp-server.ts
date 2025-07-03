@@ -476,7 +476,11 @@ export class PersonaMCPServer {
       }
     } else if (toolName.includes('create')) {
       // Validate creation parameters
-      if (!args.data && !args.attributes) {
+      // The tool factory now passes individual attribute fields, not wrapped in data/attributes
+      const hasAttributes = Object.keys(args).some(key => 
+        key !== 'data' && key !== 'attributes' && typeof args[key] !== 'undefined'
+      );
+      if (!args.data && !args.attributes && !hasAttributes) {
         throw new SecurityError('Creation data is required', 'MISSING_DATA');
       }
     }

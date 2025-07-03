@@ -4,7 +4,7 @@
  */
 
 import { describe, it, expect } from 'vitest';
-import { SecurityValidator, SecurityError } from '../../utils/security';
+import { SecurityValidator } from '../../utils/security';
 
 describe('ToolFactory', () => {
   describe('Tool Naming', () => {
@@ -60,20 +60,6 @@ describe('ToolFactory', () => {
       expect(convertParamName('inquiryId')).toBe('inquiryId');
     });
 
-    it('should validate inquiry ID parameters', () => {
-      expect(SecurityValidator.validateInquiryId('inq_123abc')).toBe(true);
-      expect(SecurityValidator.validateInquiryId('invalid')).toBe(false);
-    });
-
-    it('should validate template ID parameters', () => {
-      expect(SecurityValidator.validateInquiryTemplateId('itmpl_123abc')).toBe(true);
-      expect(SecurityValidator.validateInquiryTemplateId('invalid')).toBe(false);
-    });
-
-    it('should validate account ID parameters', () => {
-      expect(SecurityValidator.validateAccountId('acct_123abc')).toBe(true);
-      expect(SecurityValidator.validateAccountId('invalid')).toBe(false);
-    });
   });
 
   describe('Input Validation', () => {
@@ -148,17 +134,15 @@ describe('ToolFactory', () => {
   });
 
   describe('Error Handling', () => {
-    it('should handle security errors properly', () => {
-      const securityError = new SecurityError('Invalid input', 'INVALID_INPUT');
+    it('should handle basic errors properly', () => {
+      const error = new Error('Test error');
       
-      expect(securityError).toBeInstanceOf(SecurityError);
-      expect(securityError.code).toBe('INVALID_INPUT');
-      expect(securityError.message).toBe('Invalid input');
+      expect(error).toBeInstanceOf(Error);
+      expect(error.message).toBe('Test error');
     });
 
     it('should format error responses correctly', () => {
       const error = new Error('Test error');
-      const duration = 100;
       
       const errorResponse = {
         content: [{

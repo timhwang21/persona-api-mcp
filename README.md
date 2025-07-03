@@ -1,6 +1,45 @@
 # Persona API MCP Server
 
+## IMPORTANT
+
+This is an entirely vibe coded project I did to understand MCPs better. While it's actually somewhat useful for testing things locally, and while it technically works for staging / production, I definitely don't recommend using it outside of local dev for now.
+
+Right now it is capable of:
+
+- Index and show operations (exposed as resources)
+- Create, update, delete operations (exposed as tools)
+- Modifying resources (update, redact, etc.)
+- Summarizing information about resources (haven't found this to be that useful yet; likely more prompt optimization needed)
+- Introspecting the OpenAPI docs to understand how to call endpoints via the openapi resource
+
+## Overview
+
 A Model Context Protocol (MCP) server that integrates with Persona's REST API, optimized for usage with Claude Code. This server automatically generates MCP tools from Persona's OpenAPI specification, ensuring complete API coverage and type safety.
+
+### Sample prompts
+
+```
+"Fetch the latest account using the persona-api MCP. Then, make a new account with the same environment id but with reference id = 'cloned account'."
+readMcpResource(Read resource "persona://accounts" from server "persona-api")
+persona-api:account_create (MCP)(referenceId: "cloned account")
+
+"Fetch the latest inquiry using the persona-api MCP. Then, make a new inquiry with the same template and environment but with all string fields set to 'TEST'."
+readMcpResource(Read resource "persona://inquiries" from server "persona-api")
+persona-api:inquiry_create (MCP)(inquiryTemplateId: "itmpl_7XSTzJL67KWgFSi2ZFvkKQnpgd4u", fields: "{\n  \"name-first\": \"TEST\",\n  \"name-middle\": \"TEST\", \n  \"name-last\":
+                                  \"TEST\",\n  \"address-street-1\": \"TEST\",\n  \"address-street-2\": \"TEST\",\n  \"address-city\": \"TEST\",\n  \"address-subdivision\":
+                                  \"TEST\",\n  \"address-postal-code\": \"TEST\",\n  \"address-country-code\": \"TEST\",\n  \"email-address\": \"TEST\",\n  \"phone-number\":
+                                  \"TEST\",\n  \"identification-number\": \"TEST\",\n  \"identification-class\": \"TEST\",\n  \"selected-country-code\": \"TEST\",\n
+                                  \"selected-id-class\": \"TEST\",\n  \"card-access-number\": \"TEST\",\n  \"issuing-authority\": \"TEST\"\n}")
+
+"Redact the latest inquiry."
+persona-api:inquiry_redact (MCP)(inquiryId: "inq_JALcUqsXm8f9SgtZAvL5UApwtDCi")
+
+"Fetch all inquiries for the inquiry template itmpl_R8251hnpDBWCV2ckTnVqgtYm24Ac."
+readMcpResource(Read resource "persona://inquiries?filter[inquiry-template-id]=itmpl_R8251hnpDBWCV2ckTnVqgtYm24Ac" from server "persona-api")
+
+"Show me all resources that the persona-api MCP exposes."
+listMcpResources(List MCP resources from server "persona-api")
+```
 
 > **📁 Repository Structure**: This repository is designed to be cloned adjacent to the `persona-web` repository for local development. See [REPOSITORY_STRUCTURE.md](REPOSITORY_STRUCTURE.md) for details.
 
@@ -42,52 +81,36 @@ A Model Context Protocol (MCP) server that integrates with Persona's REST API, o
    ```bash
    cd persona-api-mcp
    npm install
-   ```
-
-3. **Create OpenAPI symlink:**
-   ```bash
-   # This creates a symlink to persona-web's OpenAPI specs
-   ln -sf ../persona-web/openapi/external openapi
-
-   # Verify the symlink works
-   ls -la openapi/openapi.yaml
-   ```
-
-4. **Configure API access:**
-   ```bash
    export PERSONA_API_KEY="your-local-api-key-here"
+   # or create a .env file with PERSONA_API_KEY="your-local-api-key-here"
+   npm run build
    ```
 
-5. **Start your local Persona API server:**
-   ```bash
-   # In the persona-web directory
-   cd ../persona-web
-   # Start your local development server (usually on localhost:3000)
-   # Follow persona-web's setup instructions
+3. **Enable the MCP in `~/.claude.json`:**
+   ```json
+   {
+     "mcpServers": {
+       "persona-api": {
+         "type": "stdio",
+         "command": "node",
+         "cwd": "/absolute/path/to/persona-api-mcp",
+         "args": [
+           "/absolute/path/to/persona-api-mcp/dist/server/index.js"
+         ]
+       },
+     }
+   }
    ```
 
-6. **Build and start the MCP server:**
+4. **Run Claude Code from `persona-web/`:**
    ```bash
    # Back in persona-api-mcp directory
-   cd ../persona-api-mcp
-   npm run build
-   npm start
+   cd ../persona-web
+   claude
    ```
 
-   You should see:
-   ```
-   ╔═══════════════════════════════════════════════════════════════╗
-   ║                     Persona API MCP Server                   ║
-   ║  🚀 Persona API MCP Server is running and ready for connections ║
-   ╚═══════════════════════════════════════════════════════════════╝
-   ```
+   When running `/mcp` you should see the `persona-api` MCP.
 
-### Development Mode
-
-For development with hot reloading:
-```bash
-npm run dev
-```
 
 ### 🛠️ Available Tools
 
@@ -183,18 +206,6 @@ Use the inquiry_analysis prompt to analyze inquiry inq_ABC123
 
 ## 📚 Architecture
 
-### Security and Reliability
-
-This implementation follows security best practices and patterns from [Anthropic's canonical MCP filesystem server](https://github.com/modelcontextprotocol/servers/tree/main/src/filesystem), including:
-
-- **🔒 Comprehensive Input Validation**: All tool inputs are validated with Zod schemas
-- **🛡️ Security-First Design**: Protection against null bytes, injection attacks, and invalid data
-- **⚡ Atomic Operations**: Race condition prevention for caching and file operations  
-- **📊 Enhanced Error Handling**: Detailed error responses with proper error codes
-- **🔄 Rate Limiting**: Placeholder implementation for future rate limiting
-- **🎯 Startup Validation**: Configuration and connectivity validation before server start
-- **📈 Memory Efficiency**: Optimized for handling large data sets and concurrent requests
-
 ### OpenAPI-Driven Design
 
 ```mermaid
@@ -219,14 +230,6 @@ graph TB
 4. **Resource Manager**: Caches responses and exposes as resources
 5. **MCP Server**: Orchestrates everything for Claude Code
 
-### Benefits of This Approach
-
-- **🔄 Always Up-to-Date**: Tools automatically reflect API changes
-- **🔒 Type Safety**: Generated from authoritative source with comprehensive validation
-- **📋 Complete Coverage**: Every endpoint becomes a tool
-- **⚡ High Performance**: Intelligent caching and optimization with atomic operations
-- **🛠️ Low Maintenance**: No manual schema updates required
-- **🛡️ Production Ready**: Security patterns from Anthropic's reference implementation
 
 ## 🔧 Development
 
@@ -256,93 +259,20 @@ src/
 └── openapi/                  # Symlinked OpenAPI specs
 ```
 
-### Available Scripts
-
-```bash
-npm run build        # Build for production
-npm run dev          # Development with hot reload
-npm run start        # Start production server
-npm run test         # Run all tests
-npm run lint         # Run ESLint
-npm run lint:fix     # Fix linting issues
-npm run type-check   # TypeScript type checking
-```
-
-### Debugging
-
-Enable detailed logging:
-
-```bash
-LOG_LEVEL=debug npm run dev
-```
 
 ### Adding New API Endpoints
 
 1. **Update OpenAPI symlink** (if needed)
 2. **Extend tool factory** to support new tags
 3. **Tools auto-generate** from specifications
+    * This doesn't work as is, just ask Claude to vibe-code up the new tools
 4. **No manual coding required!** 🎉
 
-## 🚨 Troubleshooting
+## 🚨 Need Help?
 
-### Common Issues
-
-#### ❌ API Key Problems
-
-**Error:**
-```
-Configuration validation failed: persona.apiKey: String must contain at least 1 character(s)
-```
-
-**Solutions:**
-- ✅ Set environment variable: `export PERSONA_API_KEY="your-key"`
-- ✅ Check key format: Must start with `persona_live_` or `persona_test_`
-- ✅ Restart terminal after setting variable
-
-#### ❌ Connection Issues
-
-**Error:**
-```
-Persona API connectivity check failed
-```
-
-**Solutions:**
-- ✅ Verify local Persona API server is running on localhost:3000
-- ✅ Test API key manually: `curl -H "Authorization: Bearer $PERSONA_API_KEY" http://localhost:3000/api/v1/inquiries?page[size]=1`
-- ✅ Check persona-web development server status
-
-#### ❌ Claude Code Integration
-
-**Symptoms:**
-- Server not appearing in Claude Code
-- "Connection failed" status
-
-**Solutions:**
-- ✅ Use **absolute paths** in configuration
-- ✅ Verify file permissions: `chmod +x dist/server/index.js`
-- ✅ Test server manually first: `npm start`
-- ✅ Check Claude Code logs for errors
-
-### 🔍 Health Checks
-
-The server performs automatic health checks:
-
-```bash
-npm start
-# Look for: ✅ Persona API connectivity check passed
-```
-
-### 💾 Cache Management
-
-**Clear cache:**
-- Restart server: `npm start`
-- Disable caching: `CACHE_ENABLED=false npm start`
-
-**Monitor cache:**
-```bash
-LOG_LEVEL=debug npm run dev
-# Watch for cache hit/miss logs
-```
+- **Quick Issues**: See our [Troubleshooting Guide](docs/TROUBLESHOOTING.md)
+- **Tool Usage**: Check the [Tool Usage Guide](docs/TOOL_USAGE_GUIDE.md)
+- **Development**: Read the [Development Guidelines](AGENTS.md)
 
 ## 🤝 Contributing
 
@@ -358,7 +288,7 @@ We welcome contributions! Here's how to get started:
 
 - **TypeScript**: Strict mode enabled with comprehensive type safety
 - **ESLint**: Code quality enforcement
-- **Prettier**: Consistent formatting  
+- **Prettier**: Consistent formatting
 - **Documentation**: JSDoc for public APIs
 - **Testing**: Vitest for unit tests with security-focused test patterns
 - **Security**: Input validation and error handling patterns from Anthropic's MCP server
@@ -368,48 +298,3 @@ We welcome contributions! Here's how to get started:
 
 MIT License - see [LICENSE](LICENSE) file for details.
 
-## 🆘 Support
-
-Need help? Here's how to get support:
-
-1. **📚 Check Documentation**: Review this README and [SETUP.md](SETUP.md)
-2. **🔍 Enable Debug Logging**: `LOG_LEVEL=debug npm run dev`
-3. **🐛 Open an Issue**: [GitHub Issues](https://github.com/your-org/persona-api-mcp/issues)
-
-When reporting issues, please include:
-- Full error messages
-- Configuration (sanitized)
-- Steps to reproduce
-- Expected vs actual behavior
-
-## 🗺️ Roadmap
-
-### ✅ Completed (v1.0)
-- ✅ OpenAPI-driven tool generation
-- ✅ Complete Inquiry API coverage
-- ✅ Resource management and caching
-- ✅ Claude Code integration
-- ✅ Production-ready infrastructure
-
-### 🔄 In Progress (v1.1)
-- 🔄 Account management endpoints
-- 🔄 Verification endpoints
-- 🔄 Report endpoints
-
-### 📋 Planned (v2.0)
-- 📋 Webhook support
-- 📋 Advanced caching strategies
-- 📋 Custom prompt templates
-- 📋 Performance optimizations
-- 📋 Plugin architecture
-- 📋 Real-time updates
-
----
-
-<div align="center">
-
-**Built with ❤️ for the Claude Code community**
-
-[Documentation](SETUP.md) • [Issues](https://github.com/your-org/persona-api-mcp/issues) • [Contributing](CONTRIBUTING.md)
-
-</div>

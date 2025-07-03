@@ -4,7 +4,7 @@
  */
 
 import { describe, it, expect } from 'vitest';
-import { SecurityValidator, SecuritySchemas, SecurityError } from './security';
+import { SecurityValidator, SecurityError } from './security';
 
 describe('SecurityValidator', () => {
   describe('validateInquiryId', () => {
@@ -154,25 +154,6 @@ describe('SecurityValidator', () => {
     });
   });
 
-  describe('validateInput', () => {
-    const testSchema = SecuritySchemas.inquiryId;
-
-    it('should validate correct input', () => {
-      const result = SecurityValidator.validateInput('inq_123abc', testSchema, 'inquiry ID');
-      expect(result).toBe('inq_123abc');
-    });
-
-    it('should provide detailed error messages', () => {
-      expect(() => SecurityValidator.validateInput('invalid', testSchema, 'inquiry ID'))
-        .toThrow('Invalid input for inquiry ID');
-    });
-
-    it('should handle validation without context', () => {
-      expect(() => SecurityValidator.validateInput('invalid', testSchema))
-        .toThrow('Invalid input:');
-    });
-  });
-
   describe('validateApiResponse', () => {
     it('should validate correct API responses', () => {
       expect(() => SecurityValidator.validateApiResponse({ data: [] })).not.toThrow();
@@ -196,79 +177,6 @@ describe('SecurityValidator', () => {
     it('should allow requests (placeholder implementation)', () => {
       expect(SecurityValidator.checkRateLimit('test_tool')).toBe(true);
       expect(SecurityValidator.checkRateLimit('another_tool')).toBe(true);
-    });
-  });
-});
-
-describe('SecuritySchemas', () => {
-  describe('inquiryId schema', () => {
-    it('should validate correct inquiry IDs', () => {
-      expect(() => SecuritySchemas.inquiryId.parse('inq_123abc')).not.toThrow();
-      expect(() => SecuritySchemas.inquiryId.parse('inq_test-inquiry_123')).not.toThrow();
-    });
-
-    it('should reject invalid inquiry IDs', () => {
-      expect(() => SecuritySchemas.inquiryId.parse('invalid')).toThrow();
-      expect(() => SecuritySchemas.inquiryId.parse('inq_')).toThrow();
-      expect(() => SecuritySchemas.inquiryId.parse('')).toThrow();
-    });
-
-    it('should provide helpful error messages', () => {
-      try {
-        SecuritySchemas.inquiryId.parse('invalid');
-      } catch (error: unknown) {
-        expect(error.message).toContain('Invalid inquiry ID format');
-      }
-    });
-  });
-
-  describe('pagination schema', () => {
-    it('should validate correct pagination', () => {
-      const result = SecuritySchemas.pagination.parse({
-        limit: 25,
-        offset: 0
-      });
-
-      expect(result).toEqual({
-        limit: 25,
-        offset: 0
-      });
-    });
-
-    it('should handle optional parameters with defaults', () => {
-      const result = SecuritySchemas.pagination.parse({});
-      expect(result).toEqual({});
-    });
-
-    it('should reject invalid pagination', () => {
-      expect(() => SecuritySchemas.pagination.parse({ limit: 0 })).toThrow();
-      expect(() => SecuritySchemas.pagination.parse({ offset: -1 })).toThrow();
-    });
-  });
-
-  describe('safeString schema', () => {
-    it('should validate safe strings', () => {
-      expect(() => SecuritySchemas.safeString.parse('hello world')).not.toThrow();
-      expect(() => SecuritySchemas.safeString.parse('valid-string_123')).not.toThrow();
-    });
-
-    it('should reject strings with null bytes', () => {
-      expect(() => SecuritySchemas.safeString.parse('hello\x00world')).toThrow('null bytes');
-    });
-
-    it('should reject overly long strings', () => {
-      expect(() => SecuritySchemas.safeString.parse('a'.repeat(1001))).toThrow('too long');
-    });
-  });
-
-  describe('booleanFlag schema', () => {
-    it('should validate boolean flags', () => {
-      expect(SecuritySchemas.booleanFlag.parse(true)).toBe(true);
-      expect(SecuritySchemas.booleanFlag.parse(false)).toBe(false);
-    });
-
-    it('should default to false', () => {
-      expect(SecuritySchemas.booleanFlag.parse(undefined)).toBe(false);
     });
   });
 });

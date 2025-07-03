@@ -210,26 +210,6 @@ export function handleError(error: Error, context?: Record<string, unknown>): vo
   }
 }
 
-/**
- * Async error handler wrapper
- */
-export function asyncErrorHandler<T extends (...args: unknown[]) => Promise<unknown>>(
-  fn: T,
-  errorHandler?: ErrorHandler
-): T {
-  return (async (...args: Parameters<T>) => {
-    try {
-      return await fn(...args);
-    } catch (error) {
-      if (errorHandler) {
-        await errorHandler(error as Error);
-      } else {
-        handleError(error as Error);
-      }
-      throw error;
-    }
-  }) as T;
-}
 
 /**
  * Retry with exponential backoff
@@ -276,22 +256,3 @@ export async function retryWithBackoff<T>(
   throw lastError!;
 }
 
-/**
- * Safe async function execution with error handling
- */
-export async function safeAsync<T>(
-  fn: () => Promise<T>,
-  defaultValue: T,
-  errorHandler?: ErrorHandler
-): Promise<T> {
-  try {
-    return await fn();
-  } catch (error) {
-    if (errorHandler) {
-      await errorHandler(error as Error);
-    } else {
-      handleError(error as Error);
-    }
-    return defaultValue;
-  }
-}

@@ -453,23 +453,6 @@ This error indicates a security validation failure. Please check your input para
       });
     });
 
-    it('should validate ID parameters for update operations', () => {
-      const validateUniversalId = (id: string): boolean => {
-        return /^[a-z]{2,}_[a-zA-Z0-9_-]+$/.test(id) && id.length >= 5 && id.length <= 100;
-      };
-
-      // Test valid IDs
-      expect(validateUniversalId('acc_123abc')).toBe(true);
-      expect(validateUniversalId('inq_456def')).toBe(true);
-      expect(validateUniversalId('ver_789ghi')).toBe(true);
-      expect(validateUniversalId('txn_012jkl')).toBe(true);
-
-      // Test invalid IDs
-      expect(validateUniversalId('invalid')).toBe(false);
-      expect(validateUniversalId('a_123')).toBe(false); // too short prefix
-      expect(validateUniversalId('acc_')).toBe(false); // missing suffix
-      expect(validateUniversalId('ACC_123')).toBe(false); // uppercase prefix
-    });
   });
 
   describe('Performance', () => {
