@@ -97,13 +97,13 @@ export class ResourceManager {
   /**
    * Read a specific resource
    */
-  async readResource(request: ReadResourceRequest): Promise<{ contents: Array<{ type: 'text'; text: string }> }> {
+  async readResource(params: { uri: string }): Promise<{ contents: Array<{ type: 'text'; text: string }> }> {
     try {
-      logger.logResourceAccess(request.uri, false);
+      logger.logResourceAccess(params.uri, false);
 
-      const content = await this.getResourceContent(request.uri);
+      const content = await this.getResourceContent(params.uri);
       
-      logger.logResourceAccess(request.uri, true, { 
+      logger.logResourceAccess(params.uri, true, { 
         size: content.length,
       });
 
@@ -116,13 +116,13 @@ export class ResourceManager {
         ],
       };
     } catch (error) {
-      logger.error('Failed to read resource', error as Error, { uri: request.uri });
+      logger.error('Failed to read resource', error as Error, { uri: params.uri });
       
       if (error instanceof NotFoundError) {
         throw error;
       }
       
-      throw new MCPError(`Failed to read resource: ${request.uri}`);
+      throw new MCPError(`Failed to read resource: ${params.uri}`);
     }
   }
 
@@ -234,10 +234,11 @@ export class ResourceManager {
       // Fetch from API
       logger.debug('Fetching inquiry from API', { inquiryId, include });
       
-      inquiry = await personaAPI.getInquiry(inquiryId, {
-        include,
-        'fields[inquiry]': params['fields[inquiry]'] as string[] | undefined,
-      });
+      const queryParams: { include?: string[]; 'fields[inquiry]'?: string[] } = {};
+      if (include) queryParams.include = include;
+      if (params['fields[inquiry]']) queryParams['fields[inquiry]'] = params['fields[inquiry]'] as string[];
+      
+      inquiry = await personaAPI.getInquiry(inquiryId, queryParams);
       
       // Cache the response
       inquiryCache.set(cacheKey, inquiry);
@@ -250,16 +251,16 @@ export class ResourceManager {
    * Get inquiry list resource content
    */
   private async getInquiryListResource(params: Record<string, unknown>): Promise<string> {
-    const queryParams: QueryParams = {
-      include: params.include as string[] | undefined,
-      'fields[inquiry]': params['fields[inquiry]'] as string[] | undefined,
-      'page[size]': params['page[size]'] as number | undefined,
-      'page[after]': params['page[after]'] as string | undefined,
-      'page[before]': params['page[before]'] as string | undefined,
-      filter: params.filter as any,
-    };
+    const queryParams: Partial<QueryParams> = {};
+    
+    if (params.include) queryParams.include = params.include as string[];
+    if (params['fields[inquiry]']) queryParams['fields[inquiry]'] = params['fields[inquiry]'] as string[];
+    if (params['page[size]']) queryParams['page[size]'] = params['page[size]'] as number;
+    if (params['page[after]']) queryParams['page[after]'] = params['page[after]'] as string;
+    if (params['page[before]']) queryParams['page[before]'] = params['page[before]'] as string;
+    if (params.filter) queryParams.filter = params.filter as any;
 
-    const cacheKey = generateInquiryListCacheKey(queryParams);
+    const cacheKey = generateInquiryListCacheKey(params);
     
     // Try to get from cache first
     let inquiries = inquiryCache.get(cacheKey) as APIResponse<Inquiry[]> | null;
@@ -268,7 +269,7 @@ export class ResourceManager {
       // Fetch from API
       logger.debug('Fetching inquiry list from API', { params: queryParams });
       
-      inquiries = await personaAPI.listInquiries(queryParams);
+      inquiries = await personaAPI.listInquiries(queryParams as QueryParams);
       
       // Cache the response
       inquiryCache.set(cacheKey, inquiries);

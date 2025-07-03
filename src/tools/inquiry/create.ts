@@ -15,7 +15,7 @@ import { CreateInquiryRequest, isInquiry } from '../../api/types.js';
 /**
  * Input schema for inquiry creation
  */
-export const createInquiryInputSchema = {
+export const createInquiryInputSchema = z.object({
   // Required template identifier (one of these must be provided)
   templateId: z.string().optional().describe('Legacy template ID starting with tmpl_'),
   inquiryTemplateId: z.string().optional().describe('Inquiry template ID starting with itmpl_'),
@@ -50,9 +50,9 @@ export const createInquiryInputSchema = {
   idempotencyKey: z.string().optional().describe('Idempotency key to ensure request uniqueness'),
   include: z.array(z.string()).optional().describe('Related objects to include in response'),
   fields_inquiry: z.array(z.string()).optional().describe('Specific inquiry fields to include in response'),
-};
+});
 
-export type CreateInquiryInput = z.infer<typeof z.object(createInquiryInputSchema)>;
+export type CreateInquiryInput = z.infer<typeof createInquiryInputSchema>;
 
 /**
  * Validate inquiry creation input
@@ -216,26 +216,28 @@ function buildRequest(input: CreateInquiryInput): CreateInquiryRequest {
 /**
  * Create inquiry tool handler
  */
-export async function createInquiry(input: CreateInquiryInput) {
+export async function createInquiry(input: unknown) {
   const timer = createTimer('create_inquiry');
 
   try {
+    const typedInput = input as CreateInquiryInput;
+    
     logger.info('Creating inquiry', {
-      templateId: input.templateId,
-      inquiryTemplateId: input.inquiryTemplateId,
-      inquiryTemplateVersionId: input.inquiryTemplateVersionId,
-      referenceId: input.referenceId,
-      accountId: input.accountId,
+      templateId: typedInput.templateId,
+      inquiryTemplateId: typedInput.inquiryTemplateId,
+      inquiryTemplateVersionId: typedInput.inquiryTemplateVersionId,
+      referenceId: typedInput.referenceId,
+      accountId: typedInput.accountId,
     });
 
     // Validate input
-    validateInput(input);
+    validateInput(typedInput);
 
     // Build request
-    const request = buildRequest(input);
+    const request = buildRequest(typedInput);
 
     // Make API call
-    const response = await personaAPI.createInquiry(request, input.idempotencyKey);
+    const response = await personaAPI.createInquiry(request, typedInput.idempotencyKey);
 
     // Cache the created inquiry
     if (response.data && isInquiry(response.data)) {
@@ -278,20 +280,21 @@ ${JSON.stringify(result, null, 2)}
     };
   } catch (error) {
     const duration = timer.end({ success: false });
+    const typedInput = input as CreateInquiryInput;
     
     handleError(error as Error, {
       tool: 'create_inquiry',
       input: {
-        templateId: input.templateId,
-        inquiryTemplateId: input.inquiryTemplateId,
-        referenceId: input.referenceId,
+        templateId: typedInput.templateId,
+        inquiryTemplateId: typedInput.inquiryTemplateId,
+        referenceId: typedInput.referenceId,
       },
       duration,
     });
 
     logger.error('Failed to create inquiry', error as Error, {
-      templateId: input.templateId,
-      inquiryTemplateId: input.inquiryTemplateId,
+      templateId: typedInput.templateId,
+      inquiryTemplateId: typedInput.inquiryTemplateId,
       duration,
     });
 

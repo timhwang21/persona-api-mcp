@@ -42,7 +42,7 @@ export class PersonaAPIClient {
   /**
    * Get default headers for API requests
    */
-  private getDefaultHeaders(): PersonaHeaders {
+  private getDefaultHeaders(): Record<string, string> {
     return {
       'Authorization': `Bearer ${this.config.persona.apiKey}`,
       'Content-Type': 'application/json',

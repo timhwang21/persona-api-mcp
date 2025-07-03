@@ -15,16 +15,16 @@ import { isInquiry } from '../../api/types.js';
 /**
  * Input schema for inquiry retrieval
  */
-export const retrieveInquiryInputSchema = {
+export const retrieveInquiryInputSchema = z.object({
   inquiryId: z.string().describe('The ID of the inquiry to retrieve (starts with inq_)').refine(
     (id) => id.startsWith('inq_'),
     { message: 'Inquiry ID must start with inq_' }
   ),
   include: z.array(z.string()).optional().describe('Related objects to include in response (account, verifications, reports, etc.)'),
   fields: z.array(z.string()).optional().describe('Specific inquiry fields to include in response'),
-};
+});
 
-export type RetrieveInquiryInput = z.infer<typeof z.object(retrieveInquiryInputSchema)>;
+export type RetrieveInquiryInput = z.infer<typeof retrieveInquiryInputSchema>;
 
 /**
  * Format inquiry data for display
@@ -76,24 +76,25 @@ function formatBehaviorData(behaviors: any): string {
 /**
  * Format included objects
  */
-function formatIncludedObjects(included: any[]): string {
+function formatIncludedObjects(included: unknown[]): string {
   if (!included || included.length === 0) {
     return '';
   }
 
   const sections: string[] = [];
-  const groupedByType = included.reduce((acc, obj) => {
-    const type = obj.type;
+  const groupedByType = included.reduce((acc: Record<string, any[]>, obj) => {
+    const typedObj = obj as any;
+    const type = typedObj.type;
     if (!acc[type]) {
       acc[type] = [];
     }
-    acc[type].push(obj);
+    acc[type].push(typedObj);
     return acc;
   }, {} as Record<string, any[]>);
 
-  Object.entries(groupedByType).forEach(([type, objects]) => {
+  Object.entries(groupedByType as Record<string, any[]>).forEach(([type, objects]) => {
     const typeTitle = type.charAt(0).toUpperCase() + type.slice(1).replace(/-/g, ' ');
-    const objectList = objects.map(obj => `- ${obj.id} (${obj.attributes?.status || 'N/A'})`).join('\n');
+    const objectList = objects.map((obj: any) => `- ${obj.id} (${obj.attributes?.status || 'N/A'})`).join('\n');
     sections.push(`**${typeTitle}:**\n${objectList}`);
   });
 
@@ -103,21 +104,28 @@ function formatIncludedObjects(included: any[]): string {
 /**
  * Retrieve inquiry tool handler
  */
-export async function retrieveInquiry(input: RetrieveInquiryInput) {
+export async function retrieveInquiry(input: unknown) {
   const timer = createTimer('retrieve_inquiry');
 
   try {
+    const typedInput = input as RetrieveInquiryInput;
+    
     logger.info('Retrieving inquiry', {
-      inquiryId: input.inquiryId,
-      include: input.include,
-      fields: input.fields,
+      inquiryId: typedInput.inquiryId,
+      include: typedInput.include,
+      fields: typedInput.fields,
     });
 
     // Make API call
-    const response = await personaAPI.getInquiry(input.inquiryId, {
-      include: input.include,
-      'fields[inquiry]': input.fields,
-    });
+    const apiParams: any = {};
+    if (typedInput.include) {
+      apiParams.include = typedInput.include;
+    }
+    if (typedInput.fields) {
+      apiParams['fields[inquiry]'] = typedInput.fields;
+    }
+    
+    const response = await personaAPI.getInquiry(typedInput.inquiryId, apiParams);
 
     // Cache the retrieved inquiry
     if (response.data && isInquiry(response.data)) {
@@ -127,17 +135,22 @@ export async function retrieveInquiry(input: RetrieveInquiryInput) {
     const duration = timer.end({ success: true });
 
     logger.info('Inquiry retrieved successfully', {
-      inquiryId: input.inquiryId,
+      inquiryId: typedInput.inquiryId,
       status: response.data?.attributes?.status,
       hasIncluded: !!response.included && response.included.length > 0,
       duration,
     });
 
     // Generate resource URI
-    const resourceUri = resourceManager.generateResourceUri('inquiry', input.inquiryId, {
-      include: input.include,
-      fields: input.fields,
-    });
+    const resourceUriParams: any = {};
+    if (typedInput.include) {
+      resourceUriParams.include = typedInput.include;
+    }
+    if (typedInput.fields) {
+      resourceUriParams.fields = typedInput.fields;
+    }
+    
+    const resourceUri = resourceManager.generateResourceUri('inquiry', typedInput.inquiryId, resourceUriParams);
 
     // Format the response
     const formattedData = formatInquiryData(response.data);
@@ -163,19 +176,20 @@ ${JSON.stringify(response, null, 2)}
     };
   } catch (error) {
     const duration = timer.end({ success: false });
+    const typedInput = input as RetrieveInquiryInput;
     
     handleError(error as Error, {
       tool: 'retrieve_inquiry',
       input: {
-        inquiryId: input.inquiryId,
-        include: input.include,
-        fields: input.fields,
+        inquiryId: typedInput.inquiryId,
+        include: typedInput.include,
+        fields: typedInput.fields,
       },
       duration,
     });
 
     logger.error('Failed to retrieve inquiry', error as Error, {
-      inquiryId: input.inquiryId,
+      inquiryId: typedInput.inquiryId,
       duration,
     });
 
@@ -185,7 +199,7 @@ ${JSON.stringify(response, null, 2)}
           type: 'text' as const,
           text: `❌ Failed to retrieve inquiry: ${(error as Error).message}
 
-**Inquiry ID:** ${input.inquiryId}`,
+**Inquiry ID:** ${typedInput.inquiryId}`,
         },
       ],
     };

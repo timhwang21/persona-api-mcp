@@ -15,7 +15,7 @@ import { InquiryStatus, isInquiry } from '../../api/types.js';
 /**
  * Input schema for inquiry listing
  */
-export const listInquiriesInputSchema = {
+export const listInquiriesInputSchema = z.object({
   // Pagination
   pageSize: z.number().int().min(1).max(100).optional().default(10).describe('Number of inquiries to return (1-100)'),
   pageAfter: z.string().optional().describe('Cursor for pagination - ID of inquiry to start after'),
@@ -38,9 +38,9 @@ export const listInquiriesInputSchema = {
   
   // Display options
   summaryOnly: z.boolean().optional().default(false).describe('Return only summary information instead of full details'),
-};
+});
 
-export type ListInquiriesInput = z.infer<typeof z.object(listInquiriesInputSchema)>;
+export type ListInquiriesInput = z.infer<typeof listInquiriesInputSchema>;
 
 /**
  * Format inquiry summary for list display

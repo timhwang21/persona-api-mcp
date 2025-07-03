@@ -5,7 +5,7 @@
  * functionality as tools and resources, optimized for Claude Code usage.
  */
 
-import { McpServer } from '@modelcontextprotocol/sdk/server/index.js';
+import { Server } from '@modelcontextprotocol/sdk/server/index.js';
 import { CallToolRequest, ListResourcesRequest, ReadResourceRequest } from '@modelcontextprotocol/sdk/types.js';
 import { z } from 'zod';
 
@@ -25,11 +25,11 @@ import {
  * MCP Server for Persona API
  */
 export class PersonaMCPServer {
-  private readonly mcpServer: McpServer;
+  private readonly mcpServer: Server;
   private readonly config = getConfig();
 
   constructor() {
-    this.mcpServer = new McpServer({
+    this.mcpServer = new Server({
       name: this.config.server.name,
       version: this.config.server.version,
     }, {
@@ -72,62 +72,76 @@ export class PersonaMCPServer {
    */
   private setupHandlers(): void {
     // List available tools
-    this.mcpServer.setRequestHandler('tools/list', async () => {
-      try {
-        const inquiryTools = getInquiryToolDefinitions();
-        
-        return {
-          tools: inquiryTools,
-        };
-      } catch (error) {
-        logger.error('Failed to list tools', error as Error);
-        // Fallback to empty tools list
-        return { tools: [] };
+    this.mcpServer.setRequestHandler(
+      z.object({ method: z.literal('tools/list') }),
+      async () => {
+        try {
+          const inquiryTools = getInquiryToolDefinitions();
+          
+          return {
+            tools: inquiryTools,
+          };
+        } catch (error) {
+          logger.error('Failed to list tools', error as Error);
+          // Fallback to empty tools list
+          return { tools: [] };
+        }
       }
-    });
+    );
 
     // Handle tool execution
-    this.mcpServer.setRequestHandler('tools/call', async (request: CallToolRequest) => {
-      const { name, arguments: args } = request.params;
+    this.mcpServer.setRequestHandler(
+      z.object({ method: z.literal('tools/call') }),
+      async (request: any) => {
+        const { name, arguments: args } = request.params;
 
-      logger.logToolExecution(name, 0, false, { arguments: args });
+        logger.logToolExecution(name, 0, false, { arguments: args });
 
-      try {
-        // Use the generated tool factory to execute tools
-        return await executeInquiryTool(name, args);
-      } catch (error) {
-        handleError(error as Error, { tool: name, arguments: args });
-        throw error;
+        try {
+          // Use the generated tool factory to execute tools
+          return await executeInquiryTool(name, args);
+        } catch (error) {
+          handleError(error as Error, { tool: name, arguments: args });
+          throw error;
+        }
       }
-    });
+    );
 
     // List available resources
-    this.mcpServer.setRequestHandler('resources/list', async (request: ListResourcesRequest) => {
-      try {
-        return {
-          resources: await resourceManager.listResources(),
-        };
-      } catch (error) {
-        handleError(error as Error, { handler: 'resources/list' });
-        throw new MCPError('Failed to list resources');
+    this.mcpServer.setRequestHandler(
+      z.object({ method: z.literal('resources/list') }),
+      async (request: ListResourcesRequest) => {
+        try {
+          return {
+            resources: await resourceManager.listResources(),
+          };
+        } catch (error) {
+          handleError(error as Error, { handler: 'resources/list' });
+          throw new MCPError('Failed to list resources');
+        }
       }
-    });
+    );
 
     // Read resource content
-    this.mcpServer.setRequestHandler('resources/read', async (request: ReadResourceRequest) => {
-      try {
-        return await resourceManager.readResource(request);
-      } catch (error) {
-        handleError(error as Error, { 
-          handler: 'resources/read',
-          uri: request.uri,
-        });
-        throw error; // Re-throw to preserve error type (e.g., NotFoundError)
+    this.mcpServer.setRequestHandler(
+      z.object({ method: z.literal('resources/read') }),
+      async (request: any) => {
+        try {
+          return await resourceManager.readResource(request.params);
+        } catch (error) {
+          handleError(error as Error, { 
+            handler: 'resources/read',
+            uri: request.params.uri,
+          });
+          throw error; // Re-throw to preserve error type (e.g., NotFoundError)
+        }
       }
-    });
+    );
 
     // List available prompts
-    this.mcpServer.setRequestHandler('prompts/list', async () => {
+    this.mcpServer.setRequestHandler(
+      z.object({ method: z.literal('prompts/list') }),
+      async () => {
       return {
         prompts: [
           {
@@ -175,10 +189,13 @@ export class PersonaMCPServer {
           },
         ],
       };
-    });
+    }
+    );
 
     // Handle prompt execution
-    this.mcpServer.setRequestHandler('prompts/get', async (request) => {
+    this.mcpServer.setRequestHandler(
+      z.object({ method: z.literal('prompts/get') }),
+      async (request: any) => {
       const { name, arguments: args } = request.params;
 
       try {
@@ -205,7 +222,8 @@ export class PersonaMCPServer {
         handleError(error as Error, { prompt: name, arguments: args });
         throw error;
       }
-    });
+    }
+    );
   }
 
 
@@ -335,7 +353,7 @@ Please start by retrieving the inquiry data and then provide step-by-step troubl
   /**
    * Get the underlying MCP server instance
    */
-  get server(): McpServer {
+  get server(): Server {
     return this.mcpServer;
   }
 

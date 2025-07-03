@@ -14,7 +14,7 @@ export abstract class AppError extends Error {
   abstract readonly code: string;
   abstract readonly statusCode: number;
   readonly timestamp: string;
-  readonly context?: Record<string, unknown>;
+  readonly context: Record<string, unknown> | undefined;
 
   constructor(message: string, context?: Record<string, unknown>) {
     super(message);
@@ -59,8 +59,8 @@ export class ConfigurationError extends AppError {
 export class PersonaAPIError extends AppError {
   readonly code = 'PERSONA_API_ERROR';
   readonly statusCode: number;
-  readonly apiStatusCode?: number;
-  readonly apiErrorCode?: string;
+  readonly apiStatusCode: number | undefined;
+  readonly apiErrorCode: string | undefined;
 
   constructor(
     message: string,
@@ -89,7 +89,7 @@ export class PersonaAPIError extends AppError {
       {
         url: error.config?.url,
         method: error.config?.method,
-        requestId: response?.headers?.[&#x27;x-request-id&#x27;],
+        requestId: response?.headers?.['x-request-id'],
       }
     );
   }
@@ -125,10 +125,7 @@ export class AuthorizationError extends AppError {
 export class ValidationError extends AppError {
   readonly code = 'VALIDATION_ERROR';
   readonly statusCode = 400;
-  readonly validationErrors?: Array<{
-    field: string;
-    message: string;
-  }>;
+  readonly validationErrors: Array<{ field: string; message: string; }> | undefined;
 
   constructor(
     message: string,
@@ -161,7 +158,7 @@ export class NotFoundError extends AppError {
 export class RateLimitError extends AppError {
   readonly code = 'RATE_LIMIT_ERROR';
   readonly statusCode = 429;
-  readonly retryAfter?: number;
+  readonly retryAfter: number | undefined;
 
   constructor(message: string, retryAfter?: number, context?: Record<string, unknown>) {
     super(`Rate limit exceeded: ${message}`, context);

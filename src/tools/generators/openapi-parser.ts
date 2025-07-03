@@ -6,7 +6,14 @@
  */
 
 import SwaggerParser from '@apidevtools/swagger-parser';
-import { OpenAPIV3 } from '@apidevtools/swagger-parser';
+// Note: OpenAPIV3 types come from the openapi-types package that swagger-parser depends on
+type OpenAPIV3Document = any;
+type OpenAPIV3OperationObject = any;
+type OpenAPIV3ParameterObject = any;
+type OpenAPIV3ReferenceObject = any;
+type OpenAPIV3RequestBodyObject = any;
+type OpenAPIV3ResponsesObject = any;
+type OpenAPIV3SchemaObject = any;
 import * as path from 'path';
 import { logger } from '../../utils/logger.js';
 import { fileURLToPath } from 'url';
@@ -103,7 +110,7 @@ export interface ParsedAPI {
  * OpenAPI Parser class
  */
 export class OpenAPIParser {
-  private api: OpenAPIV3.Document | null = null;
+  private api: OpenAPIV3Document | null = null;
   private readonly openApiPath: string;
 
   constructor() {
@@ -119,7 +126,7 @@ export class OpenAPIParser {
       logger.info('Loading OpenAPI specification', { path: this.openApiPath });
 
       const apiPath = path.join(this.openApiPath, 'openapi.yaml');
-      this.api = await SwaggerParser.dereference(apiPath) as OpenAPIV3.Document;
+      this.api = await SwaggerParser.dereference(apiPath) as OpenAPIV3Document;
 
       logger.info('OpenAPI specification loaded successfully', {
         title: this.api.info.title,
@@ -151,8 +158,9 @@ export class OpenAPIParser {
       const operations: Record<string, ParsedOperation> = {};
 
       // Parse each HTTP method
-      for (const method of ['get', 'post', 'put', 'patch', 'delete', 'head', 'options'] as const) {
-        const operation = pathItem[method];
+      const methods = ['get', 'post', 'put', 'patch', 'delete', 'head', 'options'] as const;
+      for (const method of methods) {
+        const operation = (pathItem as any)[method];
         if (operation) {
           const parsedOp = this.parseOperation(operation, method);
           if (parsedOp) {
@@ -175,44 +183,62 @@ export class OpenAPIParser {
         version: this.api.info.version,
         description: this.api.info.description,
       },
-      servers: this.api.servers?.map(server => ({
+      servers: this.api.servers?.map((server: any) => ({
         url: server.url,
         description: server.description,
       })),
       paths: parsedPaths,
-      components: {
-        schemas: this.parseComponents(this.api.components?.schemas),
-        parameters: this.parseComponentParameters(this.api.components?.parameters),
-        responses: this.parseComponentResponses(this.api.components?.responses),
-      },
+      components: (() => {
+        const components: {
+          schemas?: Record<string, ParsedSchema>;
+          parameters?: Record<string, ParsedParameter>;
+          responses?: Record<string, ParsedResponse>;
+        } = {};
+
+        const schemas = this.parseComponents(this.api.components?.schemas);
+        if (schemas) components.schemas = schemas;
+
+        const parameters = this.parseComponentParameters(this.api.components?.parameters);
+        if (parameters) components.parameters = parameters;
+
+        const responses = this.parseComponentResponses(this.api.components?.responses);
+        if (responses) components.responses = responses;
+
+        return components;
+      })(),
     };
   }
 
   /**
    * Parse a single operation
    */
-  private parseOperation(operation: OpenAPIV3.OperationObject, method: string): ParsedOperation | null {
+  private parseOperation(operation: OpenAPIV3OperationObject, method: string): ParsedOperation | null {
     if (!operation.operationId) {
       logger.warn('Operation missing operationId', { method });
       return null;
     }
 
-    return {
+    const parsed: ParsedOperation = {
       operationId: operation.operationId,
       summary: operation.summary,
       description: operation.description,
       tags: operation.tags,
-      parameters: operation.parameters?.map(param => this.parseParameter(param)).filter(Boolean) as ParsedParameter[],
-      requestBody: operation.requestBody ? this.parseRequestBody(operation.requestBody) : undefined,
+      parameters: operation.parameters?.map((param: any) => this.parseParameter(param)).filter(Boolean) as ParsedParameter[],
       responses: this.parseResponses(operation.responses || {}),
       externalDocs: operation.externalDocs,
     };
+
+    if (operation.requestBody) {
+      parsed.requestBody = this.parseRequestBody(operation.requestBody);
+    }
+
+    return parsed;
   }
 
   /**
    * Parse a parameter
    */
-  private parseParameter(param: OpenAPIV3.ReferenceObject | OpenAPIV3.ParameterObject): ParsedParameter | null {
+  private parseParameter(param: OpenAPIV3ReferenceObject | OpenAPIV3ParameterObject): ParsedParameter | null {
     if ('$ref' in param) {
       // Handle references - for now, skip them
       logger.warn('Parameter references not yet supported', { ref: param.$ref });
@@ -232,7 +258,7 @@ export class OpenAPIParser {
   /**
    * Parse request body
    */
-  private parseRequestBody(requestBody: OpenAPIV3.ReferenceObject | OpenAPIV3.RequestBodyObject): ParsedRequestBody {
+  private parseRequestBody(requestBody: OpenAPIV3ReferenceObject | OpenAPIV3RequestBodyObject): ParsedRequestBody {
     if ('$ref' in requestBody) {
       // Handle references
       return {
@@ -243,9 +269,10 @@ export class OpenAPIParser {
     const content: Record<string, { schema: ParsedSchema; examples?: Record<string, unknown> }> = {};
 
     for (const [mediaType, mediaTypeObject] of Object.entries(requestBody.content)) {
+      const typedMediaType = mediaTypeObject as any;
       content[mediaType] = {
-        schema: this.parseSchema(mediaTypeObject.schema),
-        examples: mediaTypeObject.examples as Record<string, unknown>,
+        schema: this.parseSchema(typedMediaType.schema),
+        examples: typedMediaType.examples as Record<string, unknown>,
       };
     }
 
@@ -258,30 +285,37 @@ export class OpenAPIParser {
   /**
    * Parse responses
    */
-  private parseResponses(responses: OpenAPIV3.ResponsesObject): Record<string, ParsedResponse> {
+  private parseResponses(responses: OpenAPIV3ResponsesObject): Record<string, ParsedResponse> {
     const parsed: Record<string, ParsedResponse> = {};
 
     for (const [statusCode, response] of Object.entries(responses)) {
-      if ('$ref' in response) {
+      const typedResponse = response as any;
+      if ('$ref' in typedResponse) {
         // Handle references
         continue;
       }
 
       const content: Record<string, { schema: ParsedSchema; examples?: Record<string, unknown> }> = {};
 
-      if (response.content) {
-        for (const [mediaType, mediaTypeObject] of Object.entries(response.content)) {
+      if (typedResponse.content) {
+        for (const [mediaType, mediaTypeObject] of Object.entries(typedResponse.content)) {
+          const typedMediaType = mediaTypeObject as any;
           content[mediaType] = {
-            schema: this.parseSchema(mediaTypeObject.schema),
-            examples: mediaTypeObject.examples as Record<string, unknown>,
+            schema: this.parseSchema(typedMediaType.schema),
+            examples: typedMediaType.examples as Record<string, unknown>,
           };
         }
       }
 
-      parsed[statusCode] = {
-        description: response.description,
-        content: Object.keys(content).length > 0 ? content : undefined,
+      const parsedResponse: ParsedResponse = {
+        description: typedResponse.description,
       };
+
+      if (Object.keys(content).length > 0) {
+        parsedResponse.content = content;
+      }
+
+      parsed[statusCode] = parsedResponse;
     }
 
     return parsed;
@@ -290,14 +324,25 @@ export class OpenAPIParser {
   /**
    * Parse a schema object
    */
-  private parseSchema(schema: any): ParsedSchema {
+  private parseSchema(schema: any, visited?: Set<any>): ParsedSchema {
     if (!schema) {
       return { type: 'unknown' };
     }
 
     if ('$ref' in schema) {
-      return { $ref: schema.$ref };
+      return { type: 'unknown', $ref: schema.$ref };
     }
+
+    // Initialize visited set if not provided
+    if (!visited) {
+      visited = new Set();
+    }
+
+    // Prevent circular references
+    if (visited.has(schema)) {
+      return { type: 'circular_reference' };
+    }
+    visited.add(schema);
 
     const parsed: ParsedSchema = {
       type: schema.type || 'unknown',
@@ -318,25 +363,25 @@ export class OpenAPIParser {
     if (schema.properties) {
       parsed.properties = {};
       for (const [propName, propSchema] of Object.entries(schema.properties)) {
-        parsed.properties[propName] = this.parseSchema(propSchema);
+        parsed.properties[propName] = this.parseSchema(propSchema, visited);
       }
       parsed.required = schema.required;
     }
 
     // Handle arrays
     if (schema.items) {
-      parsed.items = this.parseSchema(schema.items);
+      parsed.items = this.parseSchema(schema.items, visited);
     }
 
     // Handle composition
     if (schema.oneOf) {
-      parsed.oneOf = schema.oneOf.map((s: any) => this.parseSchema(s));
+      parsed.oneOf = schema.oneOf.map((s: any) => this.parseSchema(s, visited));
     }
     if (schema.anyOf) {
-      parsed.anyOf = schema.anyOf.map((s: any) => this.parseSchema(s));
+      parsed.anyOf = schema.anyOf.map((s: any) => this.parseSchema(s, visited));
     }
     if (schema.allOf) {
-      parsed.allOf = schema.allOf.map((s: any) => this.parseSchema(s));
+      parsed.allOf = schema.allOf.map((s: any) => this.parseSchema(s, visited));
     }
 
     return parsed;
@@ -345,7 +390,7 @@ export class OpenAPIParser {
   /**
    * Parse component schemas
    */
-  private parseComponents(schemas?: Record<string, OpenAPIV3.ReferenceObject | OpenAPIV3.SchemaObject>): Record<string, ParsedSchema> | undefined {
+  private parseComponents(schemas?: Record<string, OpenAPIV3ReferenceObject | OpenAPIV3SchemaObject>): Record<string, ParsedSchema> | undefined {
     if (!schemas) return undefined;
 
     const parsed: Record<string, ParsedSchema> = {};
@@ -358,7 +403,7 @@ export class OpenAPIParser {
   /**
    * Parse component parameters
    */
-  private parseComponentParameters(parameters?: Record<string, OpenAPIV3.ReferenceObject | OpenAPIV3.ParameterObject>): Record<string, ParsedParameter> | undefined {
+  private parseComponentParameters(parameters?: Record<string, OpenAPIV3ReferenceObject | OpenAPIV3ParameterObject>): Record<string, ParsedParameter> | undefined {
     if (!parameters) return undefined;
 
     const parsed: Record<string, ParsedParameter> = {};
@@ -374,7 +419,7 @@ export class OpenAPIParser {
   /**
    * Parse component responses
    */
-  private parseComponentResponses(responses?: Record<string, OpenAPIV3.ReferenceObject | OpenAPIV3.ResponseObject>): Record<string, ParsedResponse> | undefined {
+  private parseComponentResponses(responses?: Record<string, any>): Record<string, ParsedResponse> | undefined {
     if (!responses) return undefined;
 
     const parsed: Record<string, ParsedResponse> = {};
@@ -385,17 +430,23 @@ export class OpenAPIParser {
       
       if (response.content) {
         for (const [mediaType, mediaTypeObject] of Object.entries(response.content)) {
+          const typedMediaType = mediaTypeObject as any;
           content[mediaType] = {
-            schema: this.parseSchema(mediaTypeObject.schema),
-            examples: mediaTypeObject.examples as Record<string, unknown>,
+            schema: this.parseSchema(typedMediaType.schema),
+            examples: typedMediaType.examples as Record<string, unknown>,
           };
         }
       }
 
-      parsed[name] = {
+      const parsedResponse: ParsedResponse = {
         description: response.description,
-        content: Object.keys(content).length > 0 ? content : undefined,
       };
+
+      if (Object.keys(content).length > 0) {
+        parsedResponse.content = content;
+      }
+
+      parsed[name] = parsedResponse;
     }
     return parsed;
   }

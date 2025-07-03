@@ -66,7 +66,8 @@ export class ToolFactory {
           tools.push(tool);
         }
       } catch (error) {
-        logger.warn('Failed to generate tool', error as Error, {
+        logger.warn('Failed to generate tool', {
+          error: (error as Error).message,
           operationId: operation.operationId,
           path,
           method,
@@ -442,7 +443,8 @@ export class ToolFactory {
         }
       }
     } catch (error) {
-      logger.warn('Failed to cache response', error as Error, {
+      logger.warn('Failed to cache response', {
+        error: (error as Error).message,
         operationId: operation.operationId,
       });
     }
