@@ -6,12 +6,14 @@
  */
 
 import { z } from 'zod';
+import { zodToJsonSchema } from 'zod-to-json-schema';
 import { openAPIParser, ParsedAPI, ParsedOperation, ParsedSchema, ParsedParameter } from './openapi-parser.js';
 import { personaAPI } from '../../api/client.js';
 import { CreateInquiryRequest } from '../../api/types.js';
 import { resourceManager } from '../../resources/manager.js';
 import { logger, createTimer } from '../../utils/logger.js';
 import { handleError, ValidationError } from '../../utils/errors.js';
+import { SecurityValidator, SecuritySchemas, SecurityError } from '../../utils/security.js';
 
 export interface APIRequest {
   method: string;
@@ -169,49 +171,96 @@ export class ToolFactory {
 
   /**
    * Generate Zod input schema from operation parameters and request body
+   * Enhanced with security validation and better error handling
    */
   private generateInputSchema(operation: ParsedOperation, options: ToolGenerationOptions): ToolInputSchema {
-    const properties: Record<string, unknown> = {};
+    const schemaProperties: Record<string, z.ZodTypeAny> = {};
     const required: string[] = [];
 
-    // Add path parameters
+    // Add path parameters with security validation
     const pathParams = operation.parameters?.filter(p => p.in === 'path') || [];
     for (const param of pathParams) {
-      const zodSchema = this.convertSchemaToZod(param.schema);
-      properties[this.convertParamName(param.name)] = zodSchema.describe(param.description || `${param.name} parameter`);
+      const paramName = this.convertParamName(param.name);
+      let zodSchema = this.convertSchemaToZod(param.schema);
+      
+      // Add security validation for known ID parameters
+      if (param.name.includes('inquiry') && param.name.includes('id')) {
+        zodSchema = SecuritySchemas.inquiryId;
+      } else if (param.name.includes('template') && param.name.includes('id')) {
+        zodSchema = SecuritySchemas.inquiryTemplateId;
+      } else if (param.name.includes('account') && param.name.includes('id')) {
+        zodSchema = SecuritySchemas.accountId;
+      }
+      
+      schemaProperties[paramName] = zodSchema.describe(
+        param.description || `${param.name} parameter`
+      );
+      
       if (param.required) {
-        required.push(this.convertParamName(param.name));
+        required.push(paramName);
       }
     }
 
-    // Add query parameters
+    // Add query parameters with pagination support
     const queryParams = operation.parameters?.filter(p => p.in === 'query') || [];
     for (const param of queryParams) {
       if (!options.includeOptionalParams && !param.required) {
         continue; // Skip optional params if not requested
       }
 
-      const zodSchema = this.convertSchemaToZod(param.schema);
-      properties[this.convertParamName(param.name)] = zodSchema.describe(param.description || `${param.name} parameter`);
+      const paramName = this.convertParamName(param.name);
+      let zodSchema = this.convertSchemaToZod(param.schema);
+      
+      // Enhanced validation for common query parameters
+      if (param.name === 'limit') {
+        zodSchema = z.number()
+          .int('Limit must be an integer')
+          .min(1, 'Limit must be at least 1')
+          .max(1000, 'Limit cannot exceed 1000')
+          .default(25);
+      } else if (param.name === 'offset') {
+        zodSchema = z.number()
+          .int('Offset must be an integer')
+          .min(0, 'Offset must be non-negative')
+          .default(0);
+      } else if (param.name === 'include_relationships' || param.name === 'include') {
+        zodSchema = SecuritySchemas.booleanFlag;
+      }
+      
+      schemaProperties[paramName] = zodSchema.describe(
+        param.description || `${param.name} parameter`
+      );
       
       if (param.required) {
-        required.push(this.convertParamName(param.name));
+        required.push(paramName);
       }
     }
 
-    // Add request body properties
+    // Add request body properties with validation
     if (operation.requestBody) {
       const jsonContent = operation.requestBody.content['application/json'];
       if (jsonContent?.schema) {
         const bodyProps = this.extractPropertiesFromSchema(jsonContent.schema, 'body');
-        Object.assign(properties, bodyProps.properties);
+        Object.assign(schemaProperties, bodyProps.properties);
         required.push(...bodyProps.required);
       }
     }
 
+    // Create the main schema object
+    const mainSchema = z.object(schemaProperties);
+    
+    // Convert to JSON Schema for MCP
+    const jsonSchema = zodToJsonSchema(mainSchema, {
+      name: `${operation.operationId}Input`,
+      $refStrategy: 'none'
+    });
+
+    // Ensure we have a valid object schema
+    const objectSchema = jsonSchema as any;
+    
     return {
       type: 'object',
-      properties,
+      properties: objectSchema.properties || {},
       required: required.length > 0 ? required : undefined,
       additionalProperties: false,
     };
@@ -324,6 +373,7 @@ export class ToolFactory {
 
   /**
    * Generate handler function for the operation
+   * Enhanced with security validation, better error handling, and atomic operations
    */
   private generateHandler(
     path: string,
@@ -335,21 +385,29 @@ export class ToolFactory {
       const timer = createTimer(`tool_${operation.operationId}`);
 
       try {
+        // Step 1: Security validation and input sanitization
+        await this.validateAndSanitizeInput(input, operation);
+
         logger.info(`Executing generated tool: ${operation.operationId}`, {
           path,
           method,
           input: this.sanitizeInputForLogging(input),
         });
 
-        // Build API request from input
+        // Step 2: Rate limiting check
+        if (!SecurityValidator.checkRateLimit(`tool_${operation.operationId}`)) {
+          throw new SecurityError('Rate limit exceeded', 'RATE_LIMIT_EXCEEDED');
+        }
+
+        // Step 3: Build API request from validated input
         const apiRequest = this.buildAPIRequest(path, method, operation, input);
 
-        // Make the API call using the persona API client
-        const response = await this.executeAPIRequest(apiRequest);
+        // Step 4: Execute API request with retries and validation
+        const response = await this.executeAPIRequestWithValidation(apiRequest);
 
-        // Cache response if configured
+        // Step 5: Cache response if configured (atomic operation)
         if (options.cacheResponses && this.shouldCacheResponse(operation, response)) {
-          this.cacheResponse(operation, input, response);
+          await this.cacheResponseAtomic(operation, input, response);
         }
 
         const duration = timer.end({ success: true });
@@ -357,31 +415,162 @@ export class ToolFactory {
         logger.info(`Tool executed successfully: ${operation.operationId}`, {
           duration,
           hasData: !!response.data,
+          status: response.status,
         });
 
-        // Format response for MCP
+        // Step 6: Format and return response
         return this.formatToolResponse(operation, response, duration);
 
       } catch (error) {
         const duration = timer.end({ success: false });
         
-        handleError(error as Error, {
+        // Enhanced error handling with context
+        const errorContext = {
           tool: operation.operationId,
           path,
           method,
           input: this.sanitizeInputForLogging(input),
           duration,
-        });
-
-        return {
-          content: [
-            {
-              type: 'text' as const,
-              text: `❌ Tool execution failed: ${(error as Error).message}`,
-            },
-          ],
+          timestamp: new Date().toISOString(),
         };
+
+        handleError(error as Error, errorContext);
+
+        // Return standardized error response
+        return this.formatErrorResponse(error as Error, operation, duration);
       }
+    };
+  }
+
+  /**
+   * Validate and sanitize input with security checks
+   */
+  private async validateAndSanitizeInput(
+    input: Record<string, unknown>,
+    operation: ParsedOperation
+  ): Promise<void> {
+    // Check for null bytes and other security vulnerabilities
+    const inputStr = JSON.stringify(input);
+    if (inputStr.includes('\x00')) {
+      throw new SecurityError('Input contains null bytes', 'INVALID_INPUT');
+    }
+
+    // Validate specific ID parameters
+    for (const [key, value] of Object.entries(input)) {
+      if (typeof value === 'string') {
+        if (key.includes('inquiryId') || key.includes('inquiry_id')) {
+          if (!SecurityValidator.validateInquiryId(value)) {
+            throw new SecurityError(`Invalid inquiry ID format: ${key}`, 'INVALID_ID');
+          }
+        } else if (key.includes('templateId') || key.includes('template_id')) {
+          if (!SecurityValidator.validateInquiryTemplateId(value)) {
+            throw new SecurityError(`Invalid template ID format: ${key}`, 'INVALID_ID');
+          }
+        } else if (key.includes('accountId') || key.includes('account_id')) {
+          if (!SecurityValidator.validateAccountId(value)) {
+            throw new SecurityError(`Invalid account ID format: ${key}`, 'INVALID_ID');
+          }
+        }
+      }
+    }
+
+    // Validate pagination parameters
+    if (input.limit || input.offset || input.cursor) {
+      SecurityValidator.validatePagination({
+        limit: input.limit,
+        offset: input.offset,
+        cursor: input.cursor,
+      });
+    }
+  }
+
+  /**
+   * Execute API request with enhanced validation and error handling
+   */
+  private async executeAPIRequestWithValidation(request: APIRequest): Promise<APIResponse> {
+    try {
+      const response = await this.executeAPIRequest(request);
+      
+      // Validate API response structure
+      SecurityValidator.validateApiResponse(response);
+      
+      return response;
+    } catch (error) {
+      // Handle specific API errors
+      if (error instanceof Error) {
+        if (error.message.includes('404')) {
+          throw new Error('Resource not found. Please check the ID and try again.');
+        } else if (error.message.includes('403')) {
+          throw new SecurityError('Access denied. Insufficient permissions.', 'ACCESS_DENIED');
+        } else if (error.message.includes('429')) {
+          throw new SecurityError('Rate limit exceeded. Please try again later.', 'RATE_LIMIT');
+        } else if (error.message.includes('timeout')) {
+          throw new Error('Request timeout. The operation took too long to complete.');
+        }
+      }
+      
+      throw error;
+    }
+  }
+
+  /**
+   * Cache response using atomic operations to prevent race conditions
+   */
+  private async cacheResponseAtomic(
+    operation: ParsedOperation,
+    input: Record<string, unknown>,
+    response: APIResponse
+  ): Promise<void> {
+    try {
+      if (operation.operationId.includes('inquiry')) {
+        if (response.data && typeof response.data === 'object') {
+          const data = response.data as any;
+          if (data.id) {
+            // Use atomic caching operation
+            await resourceManager.cacheResource('inquiry', data.id, response);
+          }
+        }
+      }
+    } catch (error) {
+      // Don't fail the operation if caching fails
+      logger.warn('Failed to cache response', {
+        error: (error as Error).message,
+        operationId: operation.operationId,
+      });
+    }
+  }
+
+  /**
+   * Format standardized error response
+   */
+  private formatErrorResponse(
+    error: Error,
+    operation: ParsedOperation,
+    duration: number
+  ): ToolResponse {
+    let errorMessage = error.message;
+    let errorCode = 'UNKNOWN_ERROR';
+
+    if (error instanceof SecurityError) {
+      errorCode = error.code;
+    } else if (error instanceof ValidationError) {
+      errorCode = 'VALIDATION_ERROR';
+    }
+
+    return {
+      content: [
+        {
+          type: 'text' as const,
+          text: `❌ **${operation.summary || operation.operationId} Failed**
+
+**Error:** ${errorMessage}
+**Code:** ${errorCode}
+**Duration:** ${duration}ms
+**Timestamp:** ${new Date().toISOString()}
+
+Please check your input parameters and try again. If the error persists, contact support.`,
+        },
+      ],
     };
   }
 

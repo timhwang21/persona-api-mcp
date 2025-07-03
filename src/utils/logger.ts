@@ -88,12 +88,9 @@ class Logger {
 
     const formattedLog = this.formatLog(entry);
 
-    // Write to appropriate stream based on log level
-    if (entry.level === 'error') {
-      console.error(formattedLog);
-    } else {
-      console.log(formattedLog);
-    }
+    // IMPORTANT: For MCP stdio transport, ALL logs must go to stderr
+    // to avoid interfering with JSON-RPC protocol communication on stdout
+    console.error(formattedLog);
   }
 
   /**

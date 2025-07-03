@@ -19,7 +19,8 @@ import { handleError } from '../utils/errors.js';
 function printBanner(): void {
   const config = getConfig();
   
-  console.log(`
+  // Use stderr for banner to avoid interfering with MCP stdio protocol
+  console.error(`
 ╔═══════════════════════════════════════════════════════════════╗
 ║                     Persona API MCP Server                   ║
 ║                                                               ║
@@ -149,7 +150,7 @@ async function main(): Promise<void> {
     
     logger.error('Failed to start server', error as Error);
     
-    // Print user-friendly error message
+    // Print user-friendly error message to stderr
     console.error(`\n❌ Server startup failed: ${(error as Error).message}`);
     console.error('\nPlease check your configuration and try again.');
     console.error('Common issues:');

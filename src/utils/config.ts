@@ -108,7 +108,8 @@ export function validateConfig(config: Config): void {
 
   // Additional validation logic can be added here
   if (config.environment === 'production' && config.logging.level === 'debug') {
-    console.warn('WARNING: Debug logging is enabled in production environment');
+    // Use stderr for warnings to avoid interfering with MCP stdio protocol
+    console.error('WARNING: Debug logging is enabled in production environment');
   }
 }
 

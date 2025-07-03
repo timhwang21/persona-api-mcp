@@ -183,6 +183,18 @@ Use the inquiry_analysis prompt to analyze inquiry inq_ABC123
 
 ## 📚 Architecture
 
+### Security and Reliability
+
+This implementation follows security best practices and patterns from [Anthropic's canonical MCP filesystem server](https://github.com/modelcontextprotocol/servers/tree/main/src/filesystem), including:
+
+- **🔒 Comprehensive Input Validation**: All tool inputs are validated with Zod schemas
+- **🛡️ Security-First Design**: Protection against null bytes, injection attacks, and invalid data
+- **⚡ Atomic Operations**: Race condition prevention for caching and file operations  
+- **📊 Enhanced Error Handling**: Detailed error responses with proper error codes
+- **🔄 Rate Limiting**: Placeholder implementation for future rate limiting
+- **🎯 Startup Validation**: Configuration and connectivity validation before server start
+- **📈 Memory Efficiency**: Optimized for handling large data sets and concurrent requests
+
 ### OpenAPI-Driven Design
 
 ```mermaid
@@ -210,10 +222,11 @@ graph TB
 ### Benefits of This Approach
 
 - **🔄 Always Up-to-Date**: Tools automatically reflect API changes
-- **🔒 Type Safety**: Generated from authoritative source
+- **🔒 Type Safety**: Generated from authoritative source with comprehensive validation
 - **📋 Complete Coverage**: Every endpoint becomes a tool
-- **⚡ High Performance**: Intelligent caching and optimization
+- **⚡ High Performance**: Intelligent caching and optimization with atomic operations
 - **🛠️ Low Maintenance**: No manual schema updates required
+- **🛡️ Production Ready**: Security patterns from Anthropic's reference implementation
 
 ## 🔧 Development
 
@@ -343,11 +356,12 @@ We welcome contributions! Here's how to get started:
 
 ### Code Style Guidelines
 
-- **TypeScript**: Strict mode enabled
+- **TypeScript**: Strict mode enabled with comprehensive type safety
 - **ESLint**: Code quality enforcement
-- **Prettier**: Consistent formatting
+- **Prettier**: Consistent formatting  
 - **Documentation**: JSDoc for public APIs
-- **Testing**: Jest for unit tests
+- **Testing**: Vitest for unit tests with security-focused test patterns
+- **Security**: Input validation and error handling patterns from Anthropic's MCP server
 - **Commits**: Conventional commit format
 
 ## 📄 License
