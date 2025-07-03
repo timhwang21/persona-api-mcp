@@ -145,7 +145,6 @@ function main() {
   const output = {
     apiTags: sortedTags,
     metadata: {
-      generatedAt: new Date().toISOString(),
       generatedBy: 'scripts/extract-tags.js',
       totalTags: sortedTags.length,
       sourceFiles: {

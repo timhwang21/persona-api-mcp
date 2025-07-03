@@ -30,9 +30,9 @@ describe('SecurityValidator', () => {
 
     it('should handle edge cases', () => {
       expect(SecurityValidator.validateInquiryId('')).toBe(false);
-      expect(SecurityValidator.validateInquiryId(null as any)).toBe(false);
-      expect(SecurityValidator.validateInquiryId(undefined as any)).toBe(false);
-      expect(SecurityValidator.validateInquiryId(123 as any)).toBe(false);
+      expect(SecurityValidator.validateInquiryId(null as unknown as string)).toBe(false);
+      expect(SecurityValidator.validateInquiryId(undefined as unknown as string)).toBe(false);
+      expect(SecurityValidator.validateInquiryId(123 as unknown as string)).toBe(false);
     });
   });
 
@@ -85,9 +85,9 @@ describe('SecurityValidator', () => {
     });
 
     it('should reject non-string inputs', () => {
-      expect(() => SecurityValidator.sanitizeString(123 as any)).toThrow('must be a string');
-      expect(() => SecurityValidator.sanitizeString(null as any)).toThrow('must be a string');
-      expect(() => SecurityValidator.sanitizeString(undefined as any)).toThrow('must be a string');
+      expect(() => SecurityValidator.sanitizeString(123 as unknown as string)).toThrow('must be a string');
+      expect(() => SecurityValidator.sanitizeString(null as unknown as string)).toThrow('must be a string');
+      expect(() => SecurityValidator.sanitizeString(undefined as unknown as string)).toThrow('must be a string');
     });
   });
 
@@ -216,7 +216,7 @@ describe('SecuritySchemas', () => {
     it('should provide helpful error messages', () => {
       try {
         SecuritySchemas.inquiryId.parse('invalid');
-      } catch (error: any) {
+      } catch (error: unknown) {
         expect(error.message).toContain('Invalid inquiry ID format');
       }
     });

@@ -47,6 +47,9 @@ export interface GeneratedTool {
   description: string;
   inputSchema: ToolInputSchema;
   handler: (input: Record<string, unknown>) => Promise<ToolResponse>;
+  readOnlyHint?: boolean;
+  destructiveHint?: boolean;
+  idempotentHint?: boolean;
 }
 
 export interface ToolGenerationOptions {
@@ -122,6 +125,12 @@ export class ToolFactory {
     operation: ParsedOperation,
     options: ToolGenerationOptions
   ): GeneratedTool | null {
+    // Skip GET operations - these should be available as resources, not tools
+    // Resources are for reading data, tools are for actions that change state
+    if (method.toUpperCase() === 'GET') {
+      return null;
+    }
+
     const toolName = this.generateToolName(operation.operationId, method);
     const description = operation.summary || operation.description || `${method.toUpperCase()} ${path}`;
 
@@ -131,11 +140,35 @@ export class ToolFactory {
     // Generate handler function
     const handler = this.generateHandler(path, method, operation, options);
 
+    // Generate proper tool annotations based on HTTP method
+    const annotations = this.generateToolAnnotations(method);
+
     return {
       name: toolName,
       description,
       inputSchema,
       handler,
+      ...annotations,
+    };
+  }
+
+  /**
+   * Generate tool annotations based on HTTP method
+   */
+  private generateToolAnnotations(method: string): {
+    readOnlyHint?: boolean;
+    destructiveHint?: boolean;
+    idempotentHint?: boolean;
+  } {
+    const upperMethod = method.toUpperCase();
+    
+    return {
+      // All GETs should have readOnlyHint: true
+      readOnlyHint: upperMethod === 'GET',
+      // All POST, PUT, PATCH, DELETE should have destructiveHint: true
+      destructiveHint: ['POST', 'PUT', 'PATCH', 'DELETE'].includes(upperMethod),
+      // All GET, DELETE should have idempotentHint: true
+      idempotentHint: ['GET', 'DELETE'].includes(upperMethod),
     };
   }
 

@@ -418,3 +418,92 @@ A successful YAML-first implementation should:
 - ✅ Provide clear error messages when generation fails
 
 **Remember**: It's better to have a simple, working YAML-first implementation than a complex one that breaks the build.
+
+## 🚀 Efficient Token Usage Guidelines
+
+### Highest Token Consumers (Priority Order)
+1. **File Reading (60-70% of tokens)** - Large files like `mcp-server.ts`, `tool-factory.ts`
+2. **File Writing/Editing (15-20%)** - MultiEdit operations with large context
+3. **Bash Output (10-15%)** - Type check and lint command outputs
+
+### ❌ Token-Wasteful Anti-Patterns
+- **Reading entire large files** when only specific sections needed
+- **Re-reading files** already seen in conversation context
+- **Verbose explanations** instead of concise responses
+- **Multiple small edits** instead of batched changes
+- **Redundant file operations** for information already available
+
+### ✅ Token-Efficient Best Practices
+
+#### Use Targeted Search Instead of Full File Reads
+```bash
+# ✅ DO THIS: Find specific patterns
+grep -r "generateToolAnnotations" src/
+rg "destructiveHint" --type ts
+
+# ❌ DON'T: Read entire files to find one function
+# Read tool-factory.ts (894 lines = ~3000 tokens)
+```
+
+#### Batch Related Operations
+```typescript
+// ✅ DO THIS: Single MultiEdit with multiple changes
+MultiEdit([
+  { old_string: "pattern1", new_string: "replacement1" },
+  { old_string: "pattern2", new_string: "replacement2" },
+  { old_string: "pattern3", new_string: "replacement3" }
+])
+
+// ❌ DON'T: Multiple separate Edit calls
+```
+
+#### Give Concise Responses
+```
+# ✅ DO THIS: 1-2 sentences unless detail requested
+"Fixed type errors and added tool annotations."
+
+# ❌ DON'T: Verbose explanations
+"I have successfully completed the implementation by carefully analyzing..."
+```
+
+#### Use Context from Previous Operations
+```typescript
+// ✅ DO THIS: Reference line numbers from previous reads
+Edit(file, "line 142-145 content", "replacement")
+
+// ❌ DON'T: Re-read file to find the same content
+```
+
+#### Smart Tool Selection
+```bash
+# ✅ Use Glob for file patterns
+Glob("**/*.ts", pattern: "generateTool")
+
+# ✅ Use Grep for content search  
+Grep(pattern: "destructiveHint", include: "*.ts")
+
+# ❌ Don't Read every file individually
+```
+
+### Token Budget Awareness
+- **Large file read**: ~3000-5000 tokens
+- **Medium function edit**: ~500-1000 tokens  
+- **Bash command output**: ~200-500 tokens
+- **Concise response**: ~50-200 tokens
+
+### Emergency Token Conservation
+When approaching limits:
+1. Skip verbose explanations
+2. Use grep/glob instead of file reads
+3. Make minimal necessary edits only
+4. Defer non-critical improvements
+5. Give one-word confirmations when possible
+
+### Efficiency Metrics
+Track these patterns to improve:
+- **Files read vs. actually needed**
+- **Response length vs. information value**
+- **Edits made vs. files touched**
+- **Search operations vs. full file reads**
+
+**Goal**: Maximize useful work per token spent.

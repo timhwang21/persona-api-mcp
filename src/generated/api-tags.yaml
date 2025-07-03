@@ -36,7 +36,6 @@ apiTags:
   - Workflows
   - eCBSV Database Verifications
 metadata:
-  generatedAt: '2025-07-03T16:30:00.516Z'
   generatedBy: scripts/extract-tags.js
   totalTags: 36
   sourceFiles:

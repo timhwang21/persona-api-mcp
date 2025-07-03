@@ -137,11 +137,56 @@ async function main(): Promise<void> {
     logger.info('🚀 Persona API MCP Server is running and ready for connections');
     logger.info('The server is now available for Claude Code to connect to');
 
-    // Log usage information
-    logger.info('Usage Information', {
-      tools: 'inquiry_create, inquiry_retrieve, inquiry_list',
-      resources: 'persona://inquiry/{id}, persona://inquiries',
-      prompts: 'inquiry_analysis, inquiry_review, inquiry_troubleshooting',
+    // Log comprehensive usage information
+    logger.info('📋 Persona API MCP Server - Usage Guide', {
+      description: 'Universal MCP server for full CRUD operations on ALL Persona API resources',
+      architecture: {
+        resources: 'Read operations (GET) - Access data via persona:// URIs',
+        tools: 'Write operations (POST/PATCH/DELETE) - Perform actions that change state',
+        prompts: 'AI assistance - Inquiry analysis and troubleshooting workflows'
+      },
+      
+      // Resource patterns for reading data
+      resources: {
+        description: 'Read any resource data using persona:// URIs',
+        patterns: [
+          'persona://accounts - List all accounts',
+          'persona://accounts/acc_123 - Get specific account',
+          'persona://inquiries - List all inquiries', 
+          'persona://inquiries/inq_456 - Get specific inquiry',
+          'persona://verifications - List verifications',
+          'persona://reports - List reports',
+          'persona://transactions - List transactions',
+          'persona://cases - List cases',
+          'persona://devices - List devices',
+          'persona://documents - List documents',
+          'persona://webhooks - List webhooks'
+        ]
+      },
+      
+      // Tool patterns for state-changing operations
+      tools: {
+        description: 'Perform CRUD operations on any resource',
+        create: 'account_create, inquiry_create, verification_create, case_create, etc.',
+        update: 'account_update, inquiry_update, transaction_update, etc.',
+        redact: 'account_redact, inquiry_redact (permanent PII deletion)',
+        actions: 'account_add_tag, inquiry_approve, report_dismiss, webhook_rotate_secret, etc.',
+        note: 'All tools auto-generated from OpenAPI - supports every Persona API operation'
+      },
+      
+      // Built-in prompts for AI assistance
+      prompts: {
+        inquiry_analysis: 'Comprehensive inquiry status and risk analysis',
+        inquiry_review: 'Security, completeness, and compliance review',
+        inquiry_troubleshooting: 'Help resolve inquiry issues and blockers'
+      },
+      
+      examples: {
+        read_data: 'Ask: "Show me the last 5 inquiries" (uses resources)',
+        create: 'Ask: "Create a new inquiry with template itmpl_xxx" (uses tools)', 
+        update: 'Ask: "Update account acc_123 email to new@email.com" (uses tools)',
+        analyze: 'Ask: "Analyze inquiry inq_456 for compliance issues" (uses prompts)'
+      }
     });
 
   } catch (error) {

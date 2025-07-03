@@ -75,7 +75,15 @@ export class PersonaAPIError extends AppError {
     this.apiErrorCode = apiErrorCode;
   }
 
-  static fromAxiosError(error: any): PersonaAPIError {
+  static fromAxiosError(error: { 
+    response?: { 
+      status?: number; 
+      data?: { errors?: Array<{ code?: string; detail?: string }> };
+      headers?: unknown;
+    }; 
+    message?: string;
+    config?: unknown;
+  }): PersonaAPIError {
     const response = error.response;
     const statusCode = response?.status || 500;
     const apiErrorCode = response?.data?.errors?.[0]?.code;
@@ -87,9 +95,9 @@ export class PersonaAPIError extends AppError {
       statusCode,
       apiErrorCode,
       {
-        url: error.config?.url,
-        method: error.config?.method,
-        requestId: response?.headers?.['x-request-id'],
+        url: (error.config as any)?.url,
+        method: (error.config as any)?.method,
+        requestId: (response?.headers as any)?.['x-request-id'],
       }
     );
   }
@@ -205,7 +213,7 @@ export function handleError(error: Error, context?: Record<string, unknown>): vo
 /**
  * Async error handler wrapper
  */
-export function asyncErrorHandler<T extends (...args: any[]) => Promise<any>>(
+export function asyncErrorHandler<T extends (...args: unknown[]) => Promise<unknown>>(
   fn: T,
   errorHandler?: ErrorHandler
 ): T {

@@ -266,7 +266,8 @@ export class PersonaMCPServer {
         // Route to appropriate handler
         if (toolExists(sanitizedName)) {
           // Handle dynamic tools from OpenAPI
-          return await this.handleUniversalTool(sanitizedName, args);
+          const result = await this.handleUniversalTool(sanitizedName, args || {});
+          return result as { content: Array<{ type: string; text: string }>; isError?: boolean };
         } else {
           throw new MCPError(`Unknown tool: ${sanitizedName}`);
         }
@@ -373,7 +374,7 @@ export class PersonaMCPServer {
     // Handle prompt execution
     this.mcpServer.setRequestHandler(
       z.object({ method: z.literal('prompts/get'), params: z.object({ name: z.string(), arguments: z.record(z.unknown()).optional() }) }),
-      async (request: { params: { name: string; arguments?: Record<string, unknown> } }) => {
+      async (request: { params: { name: string; arguments?: Record<string, unknown> | undefined } }) => {
       const { name, arguments: args } = request.params;
 
       try {
@@ -411,7 +412,7 @@ export class PersonaMCPServer {
   private getStaticTools(): Array<{
     name: string;
     description: string;
-    inputSchema: any;
+    inputSchema: Record<string, unknown>;
   }> {
     return [];
   }
@@ -422,7 +423,7 @@ export class PersonaMCPServer {
   private async getDynamicTools(): Promise<Array<{
     name: string;
     description: string;
-    inputSchema: any;
+    inputSchema: Record<string, unknown>;
   }>> {
     try {
       return getAllToolDefinitions();
@@ -438,7 +439,7 @@ export class PersonaMCPServer {
   /**
    * Handle universal tool execution with validation
    */
-  private async handleUniversalTool(name: string, args: any): Promise<any> {
+  private async handleUniversalTool(name: string, args: Record<string, unknown>): Promise<unknown> {
     try {
       // Validate tool arguments based on tool type
       this.validateToolArgs(name, args);
@@ -459,7 +460,7 @@ export class PersonaMCPServer {
   /**
    * Validate tool arguments based on tool name and type
    */
-  private validateToolArgs(toolName: string, args: any): void {
+  private validateToolArgs(toolName: string, args: Record<string, unknown>): void {
     if (!args || typeof args !== 'object') {
       throw new SecurityError('Tool arguments must be an object', 'INVALID_ARGUMENTS');
     }
@@ -484,13 +485,13 @@ export class PersonaMCPServer {
   /**
    * Validate ID parameters for different resource types
    */
-  private validateIdParameter(toolName: string, args: any): void {
+  private validateIdParameter(toolName: string, args: Record<string, unknown>): void {
     if (toolName.includes('inquiry') || toolName.includes('inquiries')) {
       if (!args.inquiryId && !args.inquiry_id) {
         throw new SecurityError('Inquiry ID is required', 'MISSING_INQUIRY_ID');
       }
       const inquiryId = args.inquiryId || args.inquiry_id;
-      if (!SecurityValidator.validateInquiryId(inquiryId)) {
+      if (!SecurityValidator.validateInquiryId(inquiryId as string)) {
         throw new SecurityError('Invalid inquiry ID format', 'INVALID_INQUIRY_ID');
       }
     } else if (toolName.includes('account')) {
@@ -498,7 +499,7 @@ export class PersonaMCPServer {
         throw new SecurityError('Account ID is required', 'MISSING_ACCOUNT_ID');
       }
       const accountId = args.accountId || args.account_id;
-      if (!accountId.startsWith('act_')) {
+      if (!(accountId as string).startsWith('act_')) {
         throw new SecurityError('Invalid account ID format', 'INVALID_ACCOUNT_ID');
       }
     } else if (toolName.includes('case')) {
@@ -506,7 +507,7 @@ export class PersonaMCPServer {
         throw new SecurityError('Case ID is required', 'MISSING_CASE_ID');
       }
       const caseId = args.caseId || args.case_id;
-      if (!caseId.startsWith('cas_')) {
+      if (!(caseId as string).startsWith('cas_')) {
         throw new SecurityError('Invalid case ID format', 'INVALID_CASE_ID');
       }
     } else if (toolName.includes('verification')) {
@@ -514,7 +515,7 @@ export class PersonaMCPServer {
         throw new SecurityError('Verification ID is required', 'MISSING_VERIFICATION_ID');
       }
       const verificationId = args.verificationId || args.verification_id;
-      if (!verificationId.startsWith('ver_')) {
+      if (!(verificationId as string).startsWith('ver_')) {
         throw new SecurityError('Invalid verification ID format', 'INVALID_VERIFICATION_ID');
       }
     } else if (toolName.includes('report')) {
@@ -522,7 +523,7 @@ export class PersonaMCPServer {
         throw new SecurityError('Report ID is required', 'MISSING_REPORT_ID');
       }
       const reportId = args.reportId || args.report_id;
-      if (!reportId.startsWith('rpt_')) {
+      if (!(reportId as string).startsWith('rpt_')) {
         throw new SecurityError('Invalid report ID format', 'INVALID_REPORT_ID');
       }
     } else if (toolName.includes('transaction')) {
@@ -530,7 +531,7 @@ export class PersonaMCPServer {
         throw new SecurityError('Transaction ID is required', 'MISSING_TRANSACTION_ID');
       }
       const transactionId = args.transactionId || args.transaction_id;
-      if (!transactionId.startsWith('txn_')) {
+      if (!(transactionId as string).startsWith('txn_')) {
         throw new SecurityError('Invalid transaction ID format', 'INVALID_TRANSACTION_ID');
       }
     } else if (toolName.includes('device')) {
@@ -538,7 +539,7 @@ export class PersonaMCPServer {
         throw new SecurityError('Device ID is required', 'MISSING_DEVICE_ID');
       }
       const deviceId = args.deviceId || args.device_id;
-      if (!deviceId.startsWith('dev_')) {
+      if (!(deviceId as string).startsWith('dev_')) {
         throw new SecurityError('Invalid device ID format', 'INVALID_DEVICE_ID');
       }
     }
@@ -548,12 +549,12 @@ export class PersonaMCPServer {
   /**
    * Sanitize arguments for logging (remove sensitive data)
    */
-  private sanitizeArgsForLogging(args: any): any {
+  private sanitizeArgsForLogging(args: unknown): unknown {
     if (!args || typeof args !== 'object') {
       return args;
     }
 
-    const sanitized = { ...args };
+    const sanitized = { ...(args as Record<string, unknown>) };
     const sensitiveFields = [
       'apiKey', 'token', 'password', 'secret', 'key',
       'authorization', 'auth', 'credentials'
@@ -571,7 +572,7 @@ export class PersonaMCPServer {
   /**
    * Format standardized tool error response
    */
-  private formatToolErrorResponse(error: Error): any {
+  private formatToolErrorResponse(error: Error): { content: Array<{ type: 'text'; text: string }>; isError: boolean } {
     const errorMessage = error.message;
     let errorCode = 'UNKNOWN_ERROR';
     let isSecurityError = false;
@@ -741,7 +742,7 @@ Please start by retrieving the inquiry data and then provide step-by-step troubl
     try {
       await this.mcpServer.connect(transport);
       logger.info('MCP Server connected successfully', {
-        transport: transport.constructor.name,
+        transport: transport.constructor?.name || 'unknown',
       });
     } catch (error) {
       logger.error('Failed to connect MCP Server', error as Error);

@@ -18,7 +18,9 @@ import { fileURLToPath } from 'url';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
-const TAGS_FILE = path.resolve(__dirname, '../../generated/api-tags.yaml');
+// Fix path resolution - in production, __dirname points to dist/, so go up to project root
+const PROJECT_ROOT = path.resolve(__dirname, '../../../');
+const TAGS_FILE = path.join(PROJECT_ROOT, 'src/generated/api-tags.yaml');
 
 const allTools: any[] = [];
 let toolsInitialized = false;

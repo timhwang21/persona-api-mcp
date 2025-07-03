@@ -178,7 +178,7 @@ This error indicates a security validation failure. Please check your input para
 
     it('should gracefully degrade when dynamic tools fail', () => {
       const getToolsWithFallback = (dynamicToolsAvailable: boolean) => {
-        const staticTools: any[] = [];
+        const staticTools: Array<{ name: string; description: string; inputSchema: Record<string, unknown> }> = [];
 
         if (dynamicToolsAvailable) {
           return [...staticTools, {
