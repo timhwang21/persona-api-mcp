@@ -84,13 +84,7 @@ This error indicates a security validation failure. Please check your input para
   });
 
   describe('Tool Registration and Management', () => {
-    it('should combine static and dynamic tools correctly', () => {
-      const staticTools = [{
-        name: "list_allowed_directories",
-        description: "Static tool",
-        inputSchema: { type: "object", properties: {}, additionalProperties: false }
-      }];
-
+    it('should validate dynamic tool structure', () => {
       const dynamicTools = [{
         name: "accounts_list",
         description: "Dynamic tool",
@@ -104,11 +98,9 @@ This error indicates a security validation failure. Please check your input para
         }
       }];
 
-      const allTools = [...staticTools, ...dynamicTools];
-
       // Validate tool structure
-      expect(allTools).toHaveLength(2);
-      expect(allTools.every(tool => 
+      expect(dynamicTools).toHaveLength(1);
+      expect(dynamicTools.every(tool => 
         tool.name && 
         tool.description && 
         tool.inputSchema &&
@@ -116,23 +108,18 @@ This error indicates a security validation failure. Please check your input para
       )).toBe(true);
 
       // Validate tool naming conventions
-      expect(allTools.every(tool => tool.name.match(/^[a-z_-]+$/))).toBe(true);
+      expect(dynamicTools.every(tool => tool.name.match(/^[a-z_-]+$/))).toBe(true);
     });
 
     it('should route tool execution correctly', () => {
       const toolExecutionRouter = (toolName: string) => {
-        const staticTools = ['list_allowed_directories'];
-        
-        if (staticTools.includes(toolName)) {
-          return 'static';
-        } else if (toolName.match(/^[a-z-]+_(list|retrieve|create|update|delete)$/)) {
+        if (toolName.match(/^[a-z-]+_(list|retrieve|create|update|delete)$/)) {
           return 'dynamic';
         } else {
           return 'unknown';
         }
       };
 
-      expect(toolExecutionRouter('list_allowed_directories')).toBe('static');
       expect(toolExecutionRouter('accounts_list')).toBe('dynamic');
       expect(toolExecutionRouter('inquiries_retrieve')).toBe('dynamic');
       expect(toolExecutionRouter('invalid_tool_name')).toBe('unknown');
@@ -140,11 +127,6 @@ This error indicates a security validation failure. Please check your input para
 
     it('should validate MCP protocol compatibility', () => {
       const mockTools = [
-        {
-          name: 'list_allowed_directories',
-          description: 'Static tool for listing capabilities',
-          inputSchema: { type: 'object', properties: {}, additionalProperties: false }
-        },
         {
           name: 'accounts_list',
           description: 'Dynamic tool for listing accounts',
@@ -175,10 +157,8 @@ This error indicates a security validation failure. Please check your input para
     });
 
     it('should handle tool execution failures gracefully', async () => {
-      const mockToolExecutor = async (toolName: string, args: any) => {
-        if (toolName === 'list_allowed_directories') {
-          return { content: [{ type: 'text', text: 'Static tool executed successfully' }] };
-        } else if (toolName === 'accounts_list') {
+      const mockToolExecutor = async (toolName: string, _args: unknown) => {
+        if (toolName === 'accounts_list') {
           return { content: [{ type: 'text', text: 'Dynamic tool executed successfully' }] };
         } else if (toolName === 'failing_tool') {
           throw new Error('Tool execution failed');
@@ -188,9 +168,6 @@ This error indicates a security validation failure. Please check your input para
       };
 
       // Test successful executions
-      const staticResult = await mockToolExecutor('list_allowed_directories', {});
-      expect(staticResult.content[0].text).toContain('Static tool executed');
-
       const dynamicResult = await mockToolExecutor('accounts_list', {});
       expect(dynamicResult.content[0].text).toContain('Dynamic tool executed');
 
@@ -201,11 +178,7 @@ This error indicates a security validation failure. Please check your input para
 
     it('should gracefully degrade when dynamic tools fail', () => {
       const getToolsWithFallback = (dynamicToolsAvailable: boolean) => {
-        const staticTools = [{
-          name: 'list_allowed_directories',
-          description: 'Static fallback tool',
-          inputSchema: { type: 'object', properties: {}, additionalProperties: false }
-        }];
+        const staticTools: any[] = [];
 
         if (dynamicToolsAvailable) {
           return [...staticTools, {
@@ -219,13 +192,12 @@ This error indicates a security validation failure. Please check your input para
 
       // Test with dynamic tools available
       const toolsWithDynamic = getToolsWithFallback(true);
-      expect(toolsWithDynamic.length).toBe(2);
+      expect(toolsWithDynamic.length).toBe(1);
       expect(toolsWithDynamic.some(tool => tool.name === 'accounts_list')).toBe(true);
 
-      // Test fallback to static tools only
+      // Test fallback to no tools when dynamic tools fail
       const toolsStaticOnly = getToolsWithFallback(false);
-      expect(toolsStaticOnly.length).toBe(1);
-      expect(toolsStaticOnly[0].name).toBe('list_allowed_directories');
+      expect(toolsStaticOnly.length).toBe(0);
     });
   });
 
@@ -260,16 +232,256 @@ This error indicates a security validation failure. Please check your input para
     });
   });
 
+  describe('Update and Redaction Operations', () => {
+    it('should generate correct tool names for update operations', () => {
+      const testCases = [
+        { operationId: 'update-an-account', expected: 'account_update' },
+        { operationId: 'update-a-case', expected: 'case_update' },
+        { operationId: 'redact-an-inquiry', expected: 'inquiry_redact' },
+        { operationId: 'accounts-add-tag', expected: 'account_add_tag' },
+        { operationId: 'inquiries-approve', expected: 'inquiry_approve' },
+        { operationId: 'transactions-label', expected: 'transaction_label' },
+        { operationId: 'reports-dismiss', expected: 'report_dismiss' },
+        { operationId: 'webhooks-rotate-secret', expected: 'webhook_rotate_secret' },
+      ];
+
+      // Mock tool name generation logic (matching the actual implementation)
+      const generateToolName = (operationId: string) => {
+        const name = operationId.toLowerCase();
+        
+        // Handle resource action patterns (e.g., "accounts-add-tag", "inquiries-approve")
+        // This is specifically for cases like "accounts-add-tag" not "update-an-account"
+        if (name.match(/^[a-z-]+-[a-z-]+$/) && !name.includes('update-') && !name.includes('create-') && !name.includes('retrieve-') && !name.includes('redact-')) {
+          const parts = name.split('-');
+          if (parts.length >= 2) {
+            const resourcePart = parts[0];
+            const actionPart = parts.slice(1).join('-');
+            
+            const pluralToSingular = (plural: string) => {
+              const specialCases: Record<string, string> = {
+                'inquiries': 'inquiry',
+                'verifications': 'verification',
+                'transactions': 'transaction',
+                'accounts': 'account',
+                'reports': 'report',
+                'webhooks': 'webhook',
+              };
+              return specialCases[plural] || (plural.endsWith('s') ? plural.slice(0, -1) : plural);
+            };
+            
+            const singularResource = pluralToSingular(resourcePart);
+            const actionFormatted = actionPart.replace(/-/g, '_');
+            
+            return `${singularResource}_${actionFormatted}`;
+          }
+        }
+        
+        // Handle common CRUD patterns
+        if (name.includes('list-all-')) {
+          const resource = name.replace('list-all-', '');
+          const singularResource = resource.endsWith('s') ? resource.slice(0, -1) : resource;
+          return `${singularResource}_list`;
+        } else if (name.includes('create-an-') || name.includes('create-a-')) {
+          const resource = name.replace('create-an-', '').replace('create-a-', '');
+          const singularResource = resource.endsWith('s') ? resource.slice(0, -1) : resource;
+          return `${singularResource}_create`;
+        } else if (name.includes('retrieve-an-') || name.includes('retrieve-a-')) {
+          const resource = name.replace('retrieve-an-', '').replace('retrieve-a-', '');
+          const singularResource = resource.endsWith('s') ? resource.slice(0, -1) : resource;
+          return `${singularResource}_retrieve`;
+        } else if (name.includes('update-an-') || name.includes('update-a-')) {
+          const resource = name.replace('update-an-', '').replace('update-a-', '');
+          const singularResource = resource.endsWith('s') ? resource.slice(0, -1) : resource;
+          return `${singularResource}_update`;
+        } else if (name.includes('redact-an-') || name.includes('redact-a-')) {
+          const resource = name.replace('redact-an-', '').replace('redact-a-', '');
+          const singularResource = resource.endsWith('s') ? resource.slice(0, -1) : resource;
+          return `${singularResource}_redact`;
+        } else {
+          // General cleanup for other patterns
+          return name.replace(/-/g, '_');
+        }
+      };
+
+      testCases.forEach(({ operationId, expected }) => {
+        const result = generateToolName(operationId);
+        expect(result).toBe(expected);
+      });
+    });
+
+    it('should handle PATCH operations for resource updates', () => {
+      const mockPatchOperation = {
+        operationId: 'update-an-account',
+        method: 'PATCH',
+        parameters: [
+          { name: 'account-id', in: 'path', required: true, schema: { type: 'string' } }
+        ],
+        requestBody: {
+          content: {
+            'application/json': {
+              schema: {
+                properties: {
+                  data: {
+                    properties: {
+                      attributes: {
+                        properties: {
+                          'name-first': { type: 'string', description: 'First name' },
+                          'name-last': { type: 'string', description: 'Last name' },
+                          'email-address': { type: 'string', description: 'Email address' },
+                          tags: { type: 'array', items: { type: 'string' } },
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      };
+
+      // Validate that PATCH operations are supported
+      expect(mockPatchOperation.method).toBe('PATCH');
+      expect(mockPatchOperation.requestBody.content['application/json'].schema.properties.data).toBeDefined();
+    });
+
+    it('should handle DELETE operations for redaction', () => {
+      const mockDeleteOperation = {
+        operationId: 'redact-an-account',
+        method: 'DELETE',
+        parameters: [
+          { name: 'account-id', in: 'path', required: true, schema: { type: 'string' } }
+        ],
+        responses: {
+          '200': {
+            description: 'Account redacted successfully',
+            content: {
+              'application/json': {
+                schema: {
+                  properties: {
+                    data: { $ref: '#/components/schemas/account' }
+                  }
+                }
+              }
+            }
+          }
+        }
+      };
+
+      // Validate that DELETE operations are supported
+      expect(mockDeleteOperation.method).toBe('DELETE');
+      expect(mockDeleteOperation.responses['200']).toBeDefined();
+    });
+
+    it('should handle action endpoints with meta parameters', () => {
+      const mockActionOperation = {
+        operationId: 'accounts-add-tag',
+        method: 'POST',
+        parameters: [
+          { name: 'account-id', in: 'path', required: true, schema: { type: 'string' } }
+        ],
+        requestBody: {
+          content: {
+            'application/json': {
+              schema: {
+                properties: {
+                  meta: {
+                    properties: {
+                      'tag-name': { type: 'string', description: 'Name of the tag to add' },
+                      'tag-id': { type: 'string', description: 'ID of the tag to add' }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      };
+
+      // Validate meta pattern for action endpoints
+      expect(mockActionOperation.requestBody.content['application/json'].schema.properties.meta).toBeDefined();
+      expect(mockActionOperation.requestBody.content['application/json'].schema.properties.meta.properties['tag-name']).toBeDefined();
+    });
+
+    it('should format request data correctly for different endpoint types', () => {
+      const formatRequestData = (url: string, data: Record<string, unknown> | undefined) => {
+        if (!data || Object.keys(data).length === 0) {
+          return undefined;
+        }
+
+        // Check if this is an action endpoint (contains underscore in action part after slash)
+        const isActionEndpoint = url.includes('/_');
+        
+        if (isActionEndpoint) {
+          return { meta: data };
+        } else {
+          const inferResourceType = (url: string) => {
+            const pathSegments = url.split('/').filter(segment => segment && !segment.match(/^[a-f0-9-]{36}$/));
+            const resourcePath = pathSegments[0];
+            if (resourcePath === 'accounts') return 'account';
+            if (resourcePath === 'inquiries') return 'inquiry';
+            return resourcePath?.endsWith('s') ? resourcePath.slice(0, -1) : resourcePath;
+          };
+          
+          return {
+            data: {
+              type: inferResourceType(url),
+              attributes: data,
+            },
+          };
+        }
+      };
+
+      // Test resource update (PATCH) - no underscore, so should use data.attributes format
+      const updateData = formatRequestData('/accounts/acc_123', { 
+        nameFirst: 'Jane', 
+        nameLast: 'Doe' 
+      });
+      expect(updateData).toEqual({
+        data: {
+          type: 'account',
+          attributes: { nameFirst: 'Jane', nameLast: 'Doe' }
+        }
+      });
+
+      // Test action endpoint (POST) - has underscore, so should use meta format
+      const actionData = formatRequestData('/accounts/acc_123/_add-tag', { 
+        tagName: 'vip-customer' 
+      });
+      expect(actionData).toEqual({
+        meta: { tagName: 'vip-customer' }
+      });
+    });
+
+    it('should validate ID parameters for update operations', () => {
+      const validateUniversalId = (id: string): boolean => {
+        return /^[a-z]{2,}_[a-zA-Z0-9_-]+$/.test(id) && id.length >= 5 && id.length <= 100;
+      };
+
+      // Test valid IDs
+      expect(validateUniversalId('acc_123abc')).toBe(true);
+      expect(validateUniversalId('inq_456def')).toBe(true);
+      expect(validateUniversalId('ver_789ghi')).toBe(true);
+      expect(validateUniversalId('txn_012jkl')).toBe(true);
+
+      // Test invalid IDs
+      expect(validateUniversalId('invalid')).toBe(false);
+      expect(validateUniversalId('a_123')).toBe(false); // too short prefix
+      expect(validateUniversalId('acc_')).toBe(false); // missing suffix
+      expect(validateUniversalId('ACC_123')).toBe(false); // uppercase prefix
+    });
+  });
+
   describe('Performance', () => {
     it('should handle concurrent tool executions', async () => {
-      const toolNames = ['inquiries_list', 'inquiry_create', 'inquiry_retrieve'];
+      const toolNames = ['inquiries_list', 'inquiry_create', 'inquiry_retrieve', 'account_update', 'inquiry_redact'];
       const concurrentCalls = toolNames.map(name => 
         Promise.resolve({ tool: name, duration: Math.random() * 100, success: true })
       );
 
       const results = await Promise.all(concurrentCalls);
       
-      expect(results).toHaveLength(3);
+      expect(results).toHaveLength(5);
       expect(results.every(r => r.success)).toBe(true);
     });
 

@@ -5,7 +5,7 @@
   "type": "module",
   "main": "dist/index.js",
   "scripts": {
-    "setup-symlink": "ln -sf ../persona-web/openapi/external openapi",
+    "setup-symlink": "[ -L openapi ] || ln -sf ../persona-web/openapi/external openapi",
     "extract-tags": "node scripts/extract-tags.js",
     "generate-types": "node scripts/generate-types.js",
     "generate": "npm run setup-symlink && npm run extract-tags && npm run generate-types",

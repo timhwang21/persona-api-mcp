@@ -9,12 +9,6 @@ import { Resource } from '@modelcontextprotocol/sdk/types.js';
 import { personaAPI } from '../api/client.js';
 import { logger } from '../utils/logger.js';
 import { NotFoundError, MCPError } from '../utils/errors.js';
-import {
-  APIResponse,
-  QueryParams,
-  Inquiry,
-  isInquiry,
-} from '../api/types.js';
 
 /**
  * Resource metadata

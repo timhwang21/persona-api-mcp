@@ -146,26 +146,87 @@ export class ToolFactory {
     // Convert operation ID to a more MCP-friendly format
     // e.g., "list-all-accounts" -> "account_list"
     // e.g., "create-a-case" -> "case_create"
+    // e.g., "accounts-add-tag" -> "account_add_tag"
     
     let name = operationId.toLowerCase();
     
-    // Handle common patterns
-    if (name.includes('list-all-')) {
-      name = name.replace('list-all-', '') + '_list';
-    } else if (name.includes('create-an-') || name.includes('create-a-')) {
-      name = name.replace('create-an-', '').replace('create-a-', '') + '_create';
-    } else if (name.includes('retrieve-an-') || name.includes('retrieve-a-')) {
-      name = name.replace('retrieve-an-', '').replace('retrieve-a-', '') + '_retrieve';
-    } else if (name.includes('update-an-') || name.includes('update-a-')) {
-      name = name.replace('update-an-', '').replace('update-a-', '') + '_update';
-    } else if (name.includes('redact-an-') || name.includes('redact-a-')) {
-      name = name.replace('redact-an-', '').replace('redact-a-', '') + '_redact';
-    } else {
-      // General cleanup
-      name = name.replace(/-/g, '_');
+    // Handle resource action patterns (e.g., "accounts-add-tag", "inquiries-approve")
+    // This is specifically for cases like "accounts-add-tag" not "update-an-account"
+    if (name.match(/^[a-z-]+-[a-z-]+$/) && !name.includes('update-') && !name.includes('create-') && !name.includes('retrieve-') && !name.includes('redact-')) {
+      // Split on the first dash to separate resource from action
+      const parts = name.split('-');
+      if (parts.length >= 2 && parts[0]) {
+        const resourcePart = parts[0];
+        const actionPart = parts.slice(1).join('-');
+        
+        // Convert resource plural to singular
+        const singularResource = this.pluralToSingular(resourcePart);
+        
+        // Convert action to underscore format
+        const actionFormatted = actionPart.replace(/-/g, '_');
+        
+        return `${singularResource}_${actionFormatted}`;
+      }
     }
+    
+    // Handle common CRUD patterns
+    if (name.includes('list-all-')) {
+      const resource = name.replace('list-all-', '');
+      const singularResource = this.pluralToSingular(resource);
+      return `${singularResource}_list`;
+    } else if (name.includes('create-an-') || name.includes('create-a-')) {
+      const resource = name.replace('create-an-', '').replace('create-a-', '');
+      const singularResource = this.pluralToSingular(resource);
+      return `${singularResource}_create`;
+    } else if (name.includes('retrieve-an-') || name.includes('retrieve-a-')) {
+      const resource = name.replace('retrieve-an-', '').replace('retrieve-a-', '');
+      const singularResource = this.pluralToSingular(resource);
+      return `${singularResource}_retrieve`;
+    } else if (name.includes('update-an-') || name.includes('update-a-')) {
+      const resource = name.replace('update-an-', '').replace('update-a-', '');
+      const singularResource = this.pluralToSingular(resource);
+      return `${singularResource}_update`;
+    } else if (name.includes('redact-an-') || name.includes('redact-a-')) {
+      const resource = name.replace('redact-an-', '').replace('redact-a-', '');
+      const singularResource = this.pluralToSingular(resource);
+      return `${singularResource}_redact`;
+    } else {
+      // General cleanup for other patterns
+      return name.replace(/-/g, '_');
+    }
+  }
 
-    return name;
+  /**
+   * Convert plural resource name to singular
+   */
+  private pluralToSingular(plural: string): string {
+    // Handle special cases for Persona API resources
+    const specialCases: Record<string, string> = {
+      'inquiries': 'inquiry',
+      'verifications': 'verification',
+      'transactions': 'transaction',
+      'accounts': 'account',
+      'reports': 'report',
+      'cases': 'case',
+      'devices': 'device',
+      'documents': 'document',
+      'webhooks': 'webhook',
+      'importers': 'importer',
+      'workflows': 'workflow',
+    };
+    
+    if (specialCases[plural]) {
+      return specialCases[plural];
+    }
+    
+    // General rules for pluralization
+    if (plural.endsWith('ies')) {
+      return plural.slice(0, -3) + 'y';
+    } else if (plural.endsWith('s')) {
+      return plural.slice(0, -1);
+    }
+    
+    return plural;
   }
 
   /**
@@ -298,11 +359,18 @@ export class ToolFactory {
       }
     }
 
-    // Handle nested objects in data.attributes pattern
+    // Handle nested objects in data.attributes pattern (for resource updates)
     if (schema.properties?.data?.properties?.attributes?.properties) {
       const attrProps = this.extractPropertiesFromSchema(schema.properties.data.properties.attributes);
       Object.assign(properties, attrProps.properties);
       required.push(...attrProps.required);
+    }
+
+    // Handle nested objects in meta pattern (for action endpoints)
+    if (schema.properties?.meta?.properties) {
+      const metaProps = this.extractPropertiesFromSchema(schema.properties.meta);
+      Object.assign(properties, metaProps.properties);
+      required.push(...metaProps.required);
     }
 
     return { properties, required };
@@ -610,16 +678,12 @@ Please check your input parameters and try again. If the error persists, contact
         return await personaAPI.get(request.url, request.params);
         
       case 'POST':
-        // Format data according to Persona API conventions if present
-        const postData = request.data ? {
-          data: {
-            type: this.inferResourceType(request.url),
-            attributes: request.data,
-          },
-        } : request.data;
+        // Format data according to Persona API conventions and operation type
+        const postData = this.formatRequestData(request.url, request.data);
         return await personaAPI.post(request.url, postData, request.params);
         
       case 'PATCH':
+        // PATCH operations typically use data.attributes format for resource updates
         const patchData = request.data ? {
           data: {
             type: this.inferResourceType(request.url),
@@ -632,10 +696,38 @@ Please check your input parameters and try again. If the error persists, contact
         return await personaAPI.put(request.url, request.data, request.params);
         
       case 'DELETE':
+        // DELETE operations typically don't have a body
         return await personaAPI.delete(request.url, request.params);
         
       default:
         throw new Error(`Unsupported HTTP method: ${request.method}`);
+    }
+  }
+
+  /**
+   * Format request data based on endpoint type and Persona API conventions
+   */
+  private formatRequestData(url: string, data: Record<string, unknown> | undefined): any {
+    if (!data || Object.keys(data).length === 0) {
+      return undefined;
+    }
+
+    // Check if this is an action endpoint (contains underscore in action part after slash)
+    const isActionEndpoint = url.includes('/_');
+    
+    if (isActionEndpoint) {
+      // Action endpoints typically use the 'meta' format
+      // Examples: /accounts/{id}/_add-tag, /inquiries/{id}/_approve
+      return { meta: data };
+    } else {
+      // Resource creation/update endpoints use 'data.attributes' format
+      // Examples: /accounts, /inquiries/{id}
+      return {
+        data: {
+          type: this.inferResourceType(url),
+          attributes: data,
+        },
+      };
     }
   }
 

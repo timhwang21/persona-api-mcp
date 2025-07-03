@@ -267,9 +267,6 @@ export class PersonaMCPServer {
         if (toolExists(sanitizedName)) {
           // Handle dynamic tools from OpenAPI
           return await this.handleUniversalTool(sanitizedName, args);
-        } else if (this.isStaticTool(sanitizedName)) {
-          // Handle static tools
-          return await this.handleStaticTool(sanitizedName, args);
         } else {
           throw new MCPError(`Unknown tool: ${sanitizedName}`);
         }
@@ -306,7 +303,7 @@ export class PersonaMCPServer {
     // Read resource content
     this.mcpServer.setRequestHandler(
       z.object({ method: z.literal('resources/read'), params: z.object({ uri: z.string() }) }),
-      async (request: any) => {
+      async (request: { params: { uri: string } }) => {
         try {
           return await resourceManager.readResource(request.params);
         } catch (error) {
@@ -375,8 +372,8 @@ export class PersonaMCPServer {
 
     // Handle prompt execution
     this.mcpServer.setRequestHandler(
-      z.object({ method: z.literal('prompts/get'), params: z.object({ name: z.string(), arguments: z.any().optional() }) }),
-      async (request: any) => {
+      z.object({ method: z.literal('prompts/get'), params: z.object({ name: z.string(), arguments: z.record(z.unknown()).optional() }) }),
+      async (request: { params: { name: string; arguments?: Record<string, unknown> } }) => {
       const { name, arguments: args } = request.params;
 
       try {
@@ -408,30 +405,15 @@ export class PersonaMCPServer {
   }
 
   /**
-   * Get static tool definitions with enhanced descriptions
-   * These are core tools that don't depend on OpenAPI generation
+   * Get static tool definitions
+   * Currently no static tools - all tools are dynamically generated from OpenAPI
    */
   private getStaticTools(): Array<{
     name: string;
     description: string;
     inputSchema: any;
   }> {
-    return [
-      {
-        name: "list_allowed_directories",
-        description: 
-          "Returns the list of API endpoints and capabilities that this server " +
-          "is configured to access. Use this tool to understand what operations " +
-          "are available before attempting to use other tools. This is useful " +
-          "for debugging connection issues or understanding server capabilities.",
-        inputSchema: {
-          type: "object",
-          properties: {},
-          required: [],
-          additionalProperties: false,
-        },
-      },
-    ];
+    return [];
   }
 
   /**
@@ -562,80 +544,6 @@ export class PersonaMCPServer {
     }
   }
 
-  /**
-   * Check if a tool is a static tool
-   */
-  private isStaticTool(toolName: string): boolean {
-    const staticTools = ['list_allowed_directories'];
-    return staticTools.includes(toolName);
-  }
-
-  /**
-   * Handle static tool execution
-   */
-  private async handleStaticTool(name: string, args: any): Promise<any> {
-    switch (name) {
-      case 'list_allowed_directories':
-        return this.handleListAllowedDirectories(args);
-      default:
-        throw new MCPError(`Unknown static tool: ${name}`);
-    }
-  }
-
-  /**
-   * Handle list_allowed_directories tool
-   */
-  private async handleListAllowedDirectories(_args: any): Promise<any> {
-    try {
-      // Get all available tool definitions to show capabilities
-      const dynamicTools = await this.getDynamicTools();
-      const staticTools = this.getStaticTools();
-      const allTools = [...staticTools, ...dynamicTools];
-
-      // Extract unique endpoints from tool names
-      const endpoints = new Set<string>();
-      
-      for (const tool of dynamicTools) {
-        // Extract endpoint from tool name (e.g., account_list -> accounts)
-        if (tool.name.includes('_list')) {
-          const resourceType = tool.name.replace('_list', '');
-          endpoints.add(`/${resourceType}s`);
-        } else if (tool.name.includes('_retrieve')) {
-          const resourceType = tool.name.replace('_retrieve', '');
-          endpoints.add(`/${resourceType}s/{id}`);
-        } else if (tool.name.includes('_create')) {
-          const resourceType = tool.name.replace('_create', '');
-          endpoints.add(`/${resourceType}s`);
-        }
-      }
-
-      return {
-        content: [
-          {
-            type: 'text' as const,
-            text: `📋 **Persona API MCP Server Capabilities**
-
-**Available Endpoints:**
-${Array.from(endpoints).sort().map(ep => `• ${ep}`).join('\n')}
-
-**Available Tools:** ${allTools.length}
-${allTools.slice(0, 10).map(t => `• ${t.name}: ${t.description.substring(0, 80)}...`).join('\n')}
-${allTools.length > 10 ? `\n... and ${allTools.length - 10} more tools` : ''}
-
-**Server Configuration:**
-• API URL: ${this.config.persona.apiUrl}
-• Version: ${this.config.server.version}
-• Environment: ${this.config.environment}
-
-Use individual tools to interact with specific API endpoints.`,
-          },
-        ],
-      };
-    } catch (error) {
-      logger.error('Failed to list allowed directories', error as Error);
-      throw new MCPError('Failed to retrieve server capabilities');
-    }
-  }
 
   /**
    * Sanitize arguments for logging (remove sensitive data)
