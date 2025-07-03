@@ -114,8 +114,12 @@ async function main(): Promise<void> {
     }
 
     // Create MCP server instance
-    logger.info('Initializing MCP server...');
+    logger.info('Creating MCP server...');
     const server = new PersonaMCPServer();
+    
+    // Initialize server (load OpenAPI specs, etc.)
+    logger.info('Initializing MCP server...');
+    await server.initialize();
     logger.info('✅ MCP server initialized');
 
     // Setup graceful shutdown

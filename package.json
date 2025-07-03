@@ -25,7 +25,9 @@
   "dependencies": {
     "@modelcontextprotocol/sdk": "latest",
     "axios": "^1.6.0",
-    "zod": "^3.22.0"
+    "zod": "^3.22.0",
+    "yaml": "^2.3.0",
+    "@apidevtools/swagger-parser": "^10.1.0"
   },
   "devDependencies": {
     "@types/node": "^20.0.0",
@@ -38,5 +40,6 @@
   },
   "engines": {
     "node": ">=18.0.0"
-  }
+  },
+  "packageManager": "yarn@1.22.21+sha1.1959a18351b811cdeedbd484a8f86c3cc3bbaf72"
 }

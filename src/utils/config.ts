@@ -14,7 +14,7 @@ const ConfigSchema = z.object({
   // Persona API Configuration
   persona: z.object({
     apiKey: z.string().min(1, 'Persona API key is required'),
-    apiUrl: z.string().url().default('https://withpersona.com/api/v1'),
+    apiUrl: z.string().url().default('http://localhost:3000/api/v1'),
     timeout: z.number().positive().default(30000), // 30 seconds
     retries: z.number().min(0).default(3),
     retryDelay: z.number().positive().default(1000), // 1 second

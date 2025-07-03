@@ -2,6 +2,8 @@
 
 This guide provides detailed setup instructions for the Persona API MCP Server, including API key configuration and Claude Code integration.
 
+> **📁 Important**: This repository must be cloned adjacent to the `persona-web` repository for proper OpenAPI symlink functionality.
+
 ## Prerequisites
 
 ### System Requirements
@@ -13,35 +15,30 @@ This guide provides detailed setup instructions for the Persona API MCP Server, 
 
 ### Persona API Requirements
 
-- **Persona Account**: Active Persona account with API access
-- **API Key**: Valid Persona API key with appropriate permissions
-- **API Access**: Access to Persona's REST API endpoints
+- **persona-web Repository**: Local development environment set up
+- **API Key**: Valid API key from your local Persona development environment
+- **API Access**: Local Persona development server running on localhost:3000
 
 ## Step 1: API Key Setup
 
 ### Obtaining Your Persona API Key
 
-1. **Log into your Persona Dashboard:**
-   - Visit [https://withpersona.com](https://withpersona.com)
-   - Sign in to your account
+1. **Set up your local persona-web environment:**
+   - Follow the setup instructions in the persona-web repository
+   - Ensure the development server is running on localhost:3000
 
-2. **Navigate to API Settings:**
-   - Go to **Settings** → **API Keys**
-   - Or visit directly: [https://withpersona.com/dashboard/api-keys](https://withpersona.com/dashboard/api-keys)
+2. **Get API key from your local environment:**
+   - The API key will be available in your local development setup
+   - Check your local development environment configuration
+   - Or create a test API key in your local development database
 
-3. **Create a New API Key:**
-   - Click **"Create API Key"**
-   - Choose appropriate permissions:
+3. **For development purposes:**
+   - You can use a test API key from your local environment
+   - Ensure it has the appropriate permissions for:
      - ✅ **Inquiries**: Read and Write
      - ✅ **Accounts**: Read and Write (optional)
      - ✅ **Verifications**: Read (recommended)
      - ✅ **Reports**: Read (recommended)
-   - Set expiration date (or leave as never expires)
-   - Add description: "MCP Server for Claude Code"
-
-4. **Copy Your API Key:**
-   - Copy the generated API key immediately
-   - Store it securely (you won't be able to view it again)
 
 ### API Key Format
 
@@ -73,11 +70,11 @@ set PERSONA_API_KEY=your-api-key-here
 
 ### Verifying API Key
 
-Test your API key with curl:
+Test your API key with curl against your local server:
 ```bash
 curl -H "Authorization: Bearer $PERSONA_API_KEY" \
      -H "Persona-Version: 2023-01-05" \
-     https://withpersona.com/api/v1/inquiries?page[size]=1
+     http://localhost:3000/api/v1/inquiries?page[size]=1
 ```
 
 Expected response:
@@ -92,17 +89,38 @@ Expected response:
 
 ### Download and Install
 
-1. **Navigate to project directory:**
+1. **Clone the repository adjacent to persona-web:**
+   ```bash
+   # Assuming you have persona-web already cloned
+   cd /path/to/your/projects  # Same directory as persona-web
+   git clone <this-repo-url> persona-api-mcp
+
+   # Your directory structure should look like:
+   # /path/to/your/projects/
+   # ├── persona-web/
+   # └── persona-api-mcp/
+   ```
+
+2. **Navigate to project directory:**
    ```bash
    cd persona-api-mcp
    ```
 
-2. **Install dependencies:**
+3. **Create OpenAPI symlink:**
+   ```bash
+   # This creates a symlink to persona-web's OpenAPI specs
+   ln -sf ../persona-web/openapi/external openapi
+
+   # Verify the symlink works
+   ls -la openapi/openapi.yaml
+   ```
+
+4. **Install dependencies:**
    ```bash
    npm install
    ```
 
-3. **Build the project:**
+5. **Build the project:**
    ```bash
    npm run build
    ```
@@ -131,7 +149,7 @@ Create a `.env` file in the project root:
 PERSONA_API_KEY=your-api-key-here
 
 # Optional - API Configuration
-PERSONA_API_URL=https://withpersona.com/api/v1
+PERSONA_API_URL=http://localhost:3000/api/v1
 PERSONA_API_TIMEOUT=30000
 PERSONA_API_RETRIES=3
 
@@ -158,7 +176,7 @@ NODE_ENV=development
 | Variable | Description | Default | Options |
 |----------|-------------|---------|---------|
 | `PERSONA_API_KEY` | Your Persona API key | *required* | String starting with `persona_` |
-| `PERSONA_API_URL` | Persona API base URL | `https://withpersona.com/api/v1` | Valid URL |
+| `PERSONA_API_URL` | Persona API base URL | `http://localhost:3000/api/v1` | Valid URL |
 | `PERSONA_API_TIMEOUT` | Request timeout (ms) | `30000` | Number > 0 |
 | `PERSONA_API_RETRIES` | Retry attempts | `3` | Number ≥ 0 |
 | `CACHE_TTL` | Cache time-to-live (seconds) | `300` | Number > 0 |
@@ -170,12 +188,22 @@ NODE_ENV=development
 
 ### Manual Testing
 
-1. **Start the server:**
+1. **Ensure persona-web is running:**
    ```bash
+   # In the persona-web directory
+   cd ../persona-web
+   # Start your local development server (follow persona-web setup instructions)
+   # The server should be running on http://localhost:3000
+   ```
+
+2. **Start the MCP server:**
+   ```bash
+   # Back in the persona-api-mcp directory
+   cd ../persona-api-mcp
    npm start
    ```
 
-2. **Expected output:**
+3. **Expected output:**
    ```
    ╔═══════════════════════════════════════════════════════════════╗
    ║                     Persona API MCP Server                   ║
@@ -190,7 +218,7 @@ NODE_ENV=development
    [timestamp] INFO: 🚀 Persona API MCP Server is running and ready for connections
    ```
 
-3. **Test health endpoint (in another terminal):**
+4. **Test health endpoint (in another terminal):**
    ```bash
    # This tests the underlying API connectivity
    echo '{"jsonrpc": "2.0", "id": 1, "method": "tools/list"}' | node dist/server/index.js
@@ -223,9 +251,10 @@ This will:
      "mcpServers": {
        "persona-api": {
          "command": "node",
-         "args": ["/absolute/path/to/persona-api-mcp/dist/server/index.js"],
+         "args": ["/path/to/your/projects/persona-api-mcp/dist/server/index.js"],
          "env": {
            "PERSONA_API_KEY": "your-api-key-here",
+           "PERSONA_API_URL": "http://localhost:3000/api/v1",
            "LOG_LEVEL": "info"
          }
        }
@@ -243,10 +272,7 @@ This will:
      "mcpServers": {
        "persona-api": {
          "command": "node",
-         "args": ["./persona-api-mcp/dist/server/index.js"],
-         "env": {
-           "PERSONA_API_KEY": "your-api-key-here"
-         }
+         "args": ["./persona-api-mcp/dist/server/index.js"]
        }
      }
    }
@@ -294,10 +320,11 @@ Configuration validation failed: persona.apiKey: String must contain at least 1 
 ```
 
 **Solutions:**
-1. Verify API key is correct and active
-2. Check internet connectivity
+1. Verify persona-web development server is running on localhost:3000
+2. Check API key is correct and active in your local environment
 3. Verify API key permissions include "Inquiries: Read"
-4. Test API key with curl (see verification step above)
+4. Test API key with curl against localhost (see verification step above)
+5. Check persona-web server logs for any errors
 
 ### Issue: "Module not found" errors
 
@@ -338,12 +365,16 @@ Error: EACCES: permission denied
 ## Step 7: Validation Checklist
 
 - [ ] Node.js 18+ installed
-- [ ] Persona API key obtained and tested
+- [ ] persona-web repository cloned and set up
+- [ ] persona-web development server running on localhost:3000
+- [ ] persona-api-mcp cloned adjacent to persona-web
+- [ ] OpenAPI symlink created (`ln -sf ../persona-web/openapi/external openapi`)
+- [ ] Persona API key obtained from local environment and tested
 - [ ] Environment variables set correctly
 - [ ] Project dependencies installed (`npm install`)
 - [ ] Project built successfully (`npm run build`)
 - [ ] Server starts without errors (`npm start`)
-- [ ] Claude Code configuration updated
+- [ ] Claude Code configuration updated with correct local paths
 - [ ] Claude Code restarted
 - [ ] MCP server shows as "Connected" in Claude Code
 - [ ] Tools respond correctly in Claude Code

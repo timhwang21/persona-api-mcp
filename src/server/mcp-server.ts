@@ -16,20 +16,10 @@ import { resourceManager } from '../resources/manager.js';
 
 // Import inquiry tools
 import { 
-  createInquiry, 
-  createInquiryInputSchema,
-  type CreateInquiryInput 
-} from '../tools/inquiry/create.js';
-import { 
-  retrieveInquiry, 
-  retrieveInquiryInputSchema,
-  type RetrieveInquiryInput 
-} from '../tools/inquiry/retrieve.js';
-import { 
-  listInquiries, 
-  listInquiriesInputSchema,
-  type ListInquiriesInput 
-} from '../tools/inquiry/list.js';
+  initializeInquiryTools,
+  getInquiryToolDefinitions,
+  executeInquiryTool,
+} from '../tools/inquiry/generated.js';
 
 /**
  * MCP Server for Persona API
@@ -58,7 +48,23 @@ export class PersonaMCPServer {
     });
 
     this.setupHandlers();
-    this.registerTools();
+  }
+
+  /**
+   * Initialize the server (async setup)
+   */
+  async initialize(): Promise<void> {
+    try {
+      logger.info('Initializing MCP server...');
+      
+      // Initialize generated tools from OpenAPI
+      await initializeInquiryTools();
+      
+      logger.info('MCP server initialized successfully');
+    } catch (error) {
+      logger.error('Failed to initialize MCP server', error as Error);
+      throw error;
+    }
   }
 
   /**
@@ -67,37 +73,17 @@ export class PersonaMCPServer {
   private setupHandlers(): void {
     // List available tools
     this.mcpServer.setRequestHandler('tools/list', async () => {
-      return {
-        tools: [
-          {
-            name: 'inquiry_create',
-            description: 'Create a new inquiry with optional pre-filled attributes',
-            inputSchema: {
-              type: 'object',
-              properties: createInquiryInputSchema,
-              required: [],
-            },
-          },
-          {
-            name: 'inquiry_retrieve',
-            description: 'Retrieve the details of an existing inquiry by ID',
-            inputSchema: {
-              type: 'object',
-              properties: retrieveInquiryInputSchema,
-              required: ['inquiryId'],
-            },
-          },
-          {
-            name: 'inquiry_list',
-            description: 'List inquiries with filtering and pagination options',
-            inputSchema: {
-              type: 'object',
-              properties: listInquiriesInputSchema,
-              required: [],
-            },
-          },
-        ],
-      };
+      try {
+        const inquiryTools = getInquiryToolDefinitions();
+        
+        return {
+          tools: inquiryTools,
+        };
+      } catch (error) {
+        logger.error('Failed to list tools', error as Error);
+        // Fallback to empty tools list
+        return { tools: [] };
+      }
     });
 
     // Handle tool execution
@@ -107,19 +93,8 @@ export class PersonaMCPServer {
       logger.logToolExecution(name, 0, false, { arguments: args });
 
       try {
-        switch (name) {
-          case 'inquiry_create':
-            return await createInquiry(args as CreateInquiryInput);
-          
-          case 'inquiry_retrieve':
-            return await retrieveInquiry(args as RetrieveInquiryInput);
-          
-          case 'inquiry_list':
-            return await listInquiries(args as ListInquiriesInput);
-          
-          default:
-            throw new MCPError(`Unknown tool: ${name}`);
-        }
+        // Use the generated tool factory to execute tools
+        return await executeInquiryTool(name, args);
       } catch (error) {
         handleError(error as Error, { tool: name, arguments: args });
         throw error;
@@ -233,16 +208,6 @@ export class PersonaMCPServer {
     });
   }
 
-  /**
-   * Register additional tools (placeholder for future expansion)
-   */
-  private registerTools(): void {
-    logger.info('MCP Server initialized', {
-      name: this.config.server.name,
-      version: this.config.server.version,
-      capabilities: ['tools', 'resources', 'prompts'],
-    });
-  }
 
   /**
    * Get inquiry analysis prompt
