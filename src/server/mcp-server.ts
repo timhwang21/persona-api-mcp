@@ -6,7 +6,7 @@
  */
 
 import { Server } from '@modelcontextprotocol/sdk/server/index.js';
-import { CallToolRequest, ListResourcesRequest, ReadResourceRequest } from '@modelcontextprotocol/sdk/types.js';
+import { CallToolRequest, ListResourcesRequest, ReadResourceRequest, GetPromptRequest } from '@modelcontextprotocol/sdk/types.js';
 import { z } from 'zod';
 
 import { getConfig } from '../utils/config.js';
@@ -91,7 +91,7 @@ export class PersonaMCPServer {
 
     // Handle tool execution
     this.mcpServer.setRequestHandler(
-      z.object({ method: z.literal('tools/call') }),
+      z.object({ method: z.literal('tools/call'), params: z.object({ name: z.string(), arguments: z.any().optional() }) }),
       async (request: any) => {
         const { name, arguments: args } = request.params;
 
@@ -124,7 +124,7 @@ export class PersonaMCPServer {
 
     // Read resource content
     this.mcpServer.setRequestHandler(
-      z.object({ method: z.literal('resources/read') }),
+      z.object({ method: z.literal('resources/read'), params: z.object({ uri: z.string() }) }),
       async (request: any) => {
         try {
           return await resourceManager.readResource(request.params);
@@ -194,7 +194,7 @@ export class PersonaMCPServer {
 
     // Handle prompt execution
     this.mcpServer.setRequestHandler(
-      z.object({ method: z.literal('prompts/get') }),
+      z.object({ method: z.literal('prompts/get'), params: z.object({ name: z.string(), arguments: z.any().optional() }) }),
       async (request: any) => {
       const { name, arguments: args } = request.params;
 

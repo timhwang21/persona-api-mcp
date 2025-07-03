@@ -8,15 +8,43 @@
 import { z } from 'zod';
 import { openAPIParser, ParsedAPI, ParsedOperation, ParsedSchema, ParsedParameter } from './openapi-parser.js';
 import { personaAPI } from '../../api/client.js';
+import { CreateInquiryRequest } from '../../api/types.js';
 import { resourceManager } from '../../resources/manager.js';
 import { logger, createTimer } from '../../utils/logger.js';
 import { handleError, ValidationError } from '../../utils/errors.js';
 
+export interface APIRequest {
+  method: string;
+  url: string;
+  params?: Record<string, unknown> | undefined;
+  data?: Record<string, unknown> | undefined;
+}
+
+export interface APIResponse {
+  data: unknown;
+  status?: number;
+  statusText?: string;
+}
+
+export interface ToolInputSchema {
+  type: string;
+  properties: Record<string, unknown>;
+  required?: string[] | undefined;
+  additionalProperties: boolean;
+}
+
+export interface ToolResponse {
+  content: Array<{
+    type: 'text';
+    text: string;
+  }>;
+}
+
 export interface GeneratedTool {
   name: string;
   description: string;
-  inputSchema: Record<string, any>;
-  handler: (input: any) => Promise<any>;
+  inputSchema: ToolInputSchema;
+  handler: (input: Record<string, unknown>) => Promise<ToolResponse>;
 }
 
 export interface ToolGenerationOptions {
@@ -122,7 +150,7 @@ export class ToolFactory {
     
     // Handle common patterns
     if (name.includes('list-all-')) {
-      name = name.replace('list-all-', '').replace(/s$/, '') + '_list';
+      name = name.replace('list-all-', '') + '_list';
     } else if (name.includes('create-an-') || name.includes('create-a-')) {
       name = name.replace('create-an-', '').replace('create-a-', '') + '_create';
     } else if (name.includes('retrieve-an-') || name.includes('retrieve-a-')) {
@@ -142,8 +170,8 @@ export class ToolFactory {
   /**
    * Generate Zod input schema from operation parameters and request body
    */
-  private generateInputSchema(operation: ParsedOperation, options: ToolGenerationOptions): Record<string, any> {
-    const properties: Record<string, any> = {};
+  private generateInputSchema(operation: ParsedOperation, options: ToolGenerationOptions): ToolInputSchema {
+    const properties: Record<string, unknown> = {};
     const required: string[] = [];
 
     // Add path parameters
@@ -200,8 +228,8 @@ export class ToolFactory {
   /**
    * Extract properties from a schema object
    */
-  private extractPropertiesFromSchema(schema: ParsedSchema, prefix = ''): { properties: Record<string, any>; required: string[] } {
-    const properties: Record<string, any> = {};
+  private extractPropertiesFromSchema(schema: ParsedSchema, prefix = ''): { properties: Record<string, unknown>; required: string[] } {
+    const properties: Record<string, unknown> = {};
     const required: string[] = [];
 
     if (schema.properties) {
@@ -302,8 +330,8 @@ export class ToolFactory {
     method: string,
     operation: ParsedOperation,
     options: ToolGenerationOptions
-  ): (input: any) => Promise<any> {
-    return async (input: any) => {
+  ): (input: Record<string, unknown>) => Promise<ToolResponse> {
+    return async (input: Record<string, unknown>) => {
       const timer = createTimer(`tool_${operation.operationId}`);
 
       try {
@@ -360,20 +388,20 @@ export class ToolFactory {
   /**
    * Build API request configuration from tool input
    */
-  private buildAPIRequest(path: string, method: string, operation: ParsedOperation, input: any): any {
+  private buildAPIRequest(path: string, method: string, operation: ParsedOperation, input: Record<string, unknown>): APIRequest {
     // This is a simplified implementation
     // In a real implementation, we'd need to properly map parameters to the API client methods
     
     let apiPath = path;
-    const params: any = {};
-    const data: any = {};
+    const params: Record<string, unknown> = {};
+    const data: Record<string, unknown> = {};
 
     // Replace path parameters
     const pathParams = operation.parameters?.filter(p => p.in === 'path') || [];
     for (const param of pathParams) {
       const inputKey = this.convertParamName(param.name);
       if (input[inputKey]) {
-        apiPath = apiPath.replace(`{${param.name}}`, input[inputKey]);
+        apiPath = apiPath.replace(`{${param.name}}`, String(input[inputKey]));
       }
     }
 
@@ -404,18 +432,27 @@ export class ToolFactory {
   /**
    * Execute API request using the persona API client
    */
-  private async executeAPIRequest(request: any): Promise<any> {
+  private async executeAPIRequest(request: APIRequest): Promise<APIResponse> {
     // For now, we'll use the existing personaAPI client methods
     // This is a simplified mapping - in a real implementation,
     // we'd need to properly route to the correct API client method
     
     if (request.url === '/inquiries' && request.method === 'GET') {
-      return await personaAPI.listInquiries(request.params);
+      return await personaAPI.listInquiries(request.params || {});
     } else if (request.url === '/inquiries' && request.method === 'POST') {
-      return await personaAPI.createInquiry(request.data);
+      const inquiryData = request.data || {};
+      const createRequest: CreateInquiryRequest = {
+        data: {
+          attributes: inquiryData as any,
+        },
+      };
+      return await personaAPI.createInquiry(createRequest);
     } else if (request.url.startsWith('/inquiries/') && request.method === 'GET') {
       const inquiryId = request.url.split('/')[2];
-      return await personaAPI.getInquiry(inquiryId, request.params);
+      if (!inquiryId) {
+        throw new Error('Invalid inquiry ID');
+      }
+      return await personaAPI.getInquiry(inquiryId, request.params || {});
     }
     
     // Fallback: throw error for unsupported operations
