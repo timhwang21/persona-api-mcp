@@ -182,7 +182,7 @@ export class SecurityValidator {
   /**
    * Rate limiting check (placeholder for future implementation)
    */
-  static checkRateLimit(identifier: string): boolean {
+  static checkRateLimit(_identifier: string): boolean {
     // TODO: Implement rate limiting logic
     // For now, always allow
     return true;

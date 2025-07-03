@@ -103,7 +103,6 @@ async function main(): Promise<void> {
       version: config.server.version,
       environment: config.environment,
       apiUrl: config.persona.apiUrl,
-      cacheEnabled: config.cache.enabled,
       logLevel: config.logging.level,
     });
 

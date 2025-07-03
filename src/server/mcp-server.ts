@@ -7,28 +7,25 @@
 
 import { Server } from '@modelcontextprotocol/sdk/server/index.js';
 import { 
-  CallToolRequest, 
   ListResourcesRequest, 
-  ReadResourceRequest, 
-  GetPromptRequest,
   ListToolsRequestSchema,
   CallToolRequestSchema 
 } from '@modelcontextprotocol/sdk/types.js';
 import { z } from 'zod';
-import { zodToJsonSchema } from 'zod-to-json-schema';
 
 import { getConfig } from '../utils/config.js';
 import { logger } from '../utils/logger.js';
 import { handleError, MCPError } from '../utils/errors.js';
-import { SecurityValidator, SecuritySchemas, SecurityError } from '../utils/security.js';
+import { SecurityValidator, SecurityError } from '../utils/security.js';
 import { resourceManager } from '../resources/manager.js';
 
-// Import inquiry tools
+// Import all tools (YAML-based generation)
 import { 
-  initializeInquiryTools,
-  getInquiryToolDefinitions,
-  executeInquiryTool,
-} from '../tools/inquiry/generated.js';
+  initializeAllTools,
+  getAllToolDefinitions,
+  executeTool,
+  toolExists,
+} from '../tools/generated/all-tools.js';
 
 /**
  * MCP Server for Persona API
@@ -147,7 +144,7 @@ export class PersonaMCPServer {
       // Attempt a simple API call to validate connectivity
       // This is a simplified check - in a real implementation,
       // we might have a dedicated health check endpoint
-      const healthCheck = await Promise.race([
+      await Promise.race([
         // Simple timeout check
         new Promise((_, reject) => 
           setTimeout(() => reject(new Error('Health check timeout')), 5000)
@@ -169,20 +166,21 @@ export class PersonaMCPServer {
    * Initialize tools with comprehensive validation
    */
   private async initializeToolsWithValidation(): Promise<void> {
-    logger.info('Initializing tools with validation...');
+    logger.info('Initializing all tools from OpenAPI specification...');
 
     try {
-      // Initialize generated tools from OpenAPI
-      await initializeInquiryTools();
+      // Initialize all generated tools from OpenAPI
+      await initializeAllTools();
       
       // Validate tool definitions
-      const toolDefinitions = getInquiryToolDefinitions();
+      const toolDefinitions = getAllToolDefinitions();
       
       if (toolDefinitions.length === 0) {
-        logger.warn('No dynamic tools were generated from OpenAPI specification');
+        logger.warn('No tools were generated from OpenAPI specification');
       } else {
         logger.info(`Generated ${toolDefinitions.length} tools from OpenAPI specification`, {
-          toolNames: toolDefinitions.map(t => t.name),
+          toolCount: toolDefinitions.length,
+          sampleToolNames: toolDefinitions.slice(0, 5).map(t => t.name),
         });
       }
 
@@ -193,7 +191,7 @@ export class PersonaMCPServer {
         }
       }
 
-      logger.info('Tools initialized and validated successfully');
+      logger.info('All tools initialized and validated successfully');
     } catch (error) {
       // Don't fail server startup if dynamic tools fail
       // Fall back to static tools only
@@ -266,8 +264,12 @@ export class PersonaMCPServer {
         });
 
         // Route to appropriate handler
-        if (sanitizedName.startsWith('inquiry') || sanitizedName.startsWith('inquiries')) {
-          return await this.handleInquiryTool(sanitizedName, args);
+        if (toolExists(sanitizedName)) {
+          // Handle dynamic tools from OpenAPI
+          return await this.handleUniversalTool(sanitizedName, args);
+        } else if (this.isStaticTool(sanitizedName)) {
+          // Handle static tools
+          return await this.handleStaticTool(sanitizedName, args);
         } else {
           throw new MCPError(`Unknown tool: ${sanitizedName}`);
         }
@@ -289,7 +291,7 @@ export class PersonaMCPServer {
     // List available resources
     this.mcpServer.setRequestHandler(
       z.object({ method: z.literal('resources/list') }),
-      async (request: ListResourcesRequest) => {
+      async (_request: ListResourcesRequest) => {
         try {
           return {
             resources: await resourceManager.listResources(),
@@ -441,7 +443,7 @@ export class PersonaMCPServer {
     inputSchema: any;
   }>> {
     try {
-      return getInquiryToolDefinitions();
+      return getAllToolDefinitions();
     } catch (error) {
       logger.warn('Failed to get dynamic tools', {
         error: (error as Error).message,
@@ -452,15 +454,15 @@ export class PersonaMCPServer {
   }
 
   /**
-   * Handle inquiry tool execution with validation
+   * Handle universal tool execution with validation
    */
-  private async handleInquiryTool(name: string, args: any): Promise<any> {
+  private async handleUniversalTool(name: string, args: any): Promise<any> {
     try {
-      // Validate inquiry tool arguments
-      this.validateInquiryToolArgs(name, args);
+      // Validate tool arguments based on tool type
+      this.validateToolArgs(name, args);
       
-      // Execute the tool
-      return await executeInquiryTool(name, args);
+      // Execute the tool using universal executor
+      return await executeTool(name, args);
     } catch (error) {
       if (error instanceof SecurityError) {
         throw error;
@@ -473,29 +475,20 @@ export class PersonaMCPServer {
   }
 
   /**
-   * Validate inquiry tool arguments based on tool name
+   * Validate tool arguments based on tool name and type
    */
-  private validateInquiryToolArgs(toolName: string, args: any): void {
+  private validateToolArgs(toolName: string, args: any): void {
     if (!args || typeof args !== 'object') {
       throw new SecurityError('Tool arguments must be an object', 'INVALID_ARGUMENTS');
     }
 
-    // Validate based on tool type
+    // Universal validation based on tool patterns
     if (toolName.includes('retrieve') || toolName.includes('get')) {
       // Tools that require an ID parameter
-      if (toolName.includes('inquiry')) {
-        if (!args.inquiryId && !args.inquiry_id) {
-          throw new SecurityError('Inquiry ID is required', 'MISSING_INQUIRY_ID');
-        }
-        
-        const inquiryId = args.inquiryId || args.inquiry_id;
-        if (!SecurityValidator.validateInquiryId(inquiryId)) {
-          throw new SecurityError('Invalid inquiry ID format', 'INVALID_INQUIRY_ID');
-        }
-      }
+      this.validateIdParameter(toolName, args);
     } else if (toolName.includes('list')) {
       // Validate pagination parameters
-      if (args.limit || args.offset || args.cursor) {
+      if (args.limit || args.offset || args.cursor || args.page) {
         SecurityValidator.validatePagination(args);
       }
     } else if (toolName.includes('create')) {
@@ -503,6 +496,144 @@ export class PersonaMCPServer {
       if (!args.data && !args.attributes) {
         throw new SecurityError('Creation data is required', 'MISSING_DATA');
       }
+    }
+  }
+
+  /**
+   * Validate ID parameters for different resource types
+   */
+  private validateIdParameter(toolName: string, args: any): void {
+    if (toolName.includes('inquiry') || toolName.includes('inquiries')) {
+      if (!args.inquiryId && !args.inquiry_id) {
+        throw new SecurityError('Inquiry ID is required', 'MISSING_INQUIRY_ID');
+      }
+      const inquiryId = args.inquiryId || args.inquiry_id;
+      if (!SecurityValidator.validateInquiryId(inquiryId)) {
+        throw new SecurityError('Invalid inquiry ID format', 'INVALID_INQUIRY_ID');
+      }
+    } else if (toolName.includes('account')) {
+      if (!args.accountId && !args.account_id) {
+        throw new SecurityError('Account ID is required', 'MISSING_ACCOUNT_ID');
+      }
+      const accountId = args.accountId || args.account_id;
+      if (!accountId.startsWith('act_')) {
+        throw new SecurityError('Invalid account ID format', 'INVALID_ACCOUNT_ID');
+      }
+    } else if (toolName.includes('case')) {
+      if (!args.caseId && !args.case_id) {
+        throw new SecurityError('Case ID is required', 'MISSING_CASE_ID');
+      }
+      const caseId = args.caseId || args.case_id;
+      if (!caseId.startsWith('cas_')) {
+        throw new SecurityError('Invalid case ID format', 'INVALID_CASE_ID');
+      }
+    } else if (toolName.includes('verification')) {
+      if (!args.verificationId && !args.verification_id) {
+        throw new SecurityError('Verification ID is required', 'MISSING_VERIFICATION_ID');
+      }
+      const verificationId = args.verificationId || args.verification_id;
+      if (!verificationId.startsWith('ver_')) {
+        throw new SecurityError('Invalid verification ID format', 'INVALID_VERIFICATION_ID');
+      }
+    } else if (toolName.includes('report')) {
+      if (!args.reportId && !args.report_id) {
+        throw new SecurityError('Report ID is required', 'MISSING_REPORT_ID');
+      }
+      const reportId = args.reportId || args.report_id;
+      if (!reportId.startsWith('rpt_')) {
+        throw new SecurityError('Invalid report ID format', 'INVALID_REPORT_ID');
+      }
+    } else if (toolName.includes('transaction')) {
+      if (!args.transactionId && !args.transaction_id) {
+        throw new SecurityError('Transaction ID is required', 'MISSING_TRANSACTION_ID');
+      }
+      const transactionId = args.transactionId || args.transaction_id;
+      if (!transactionId.startsWith('txn_')) {
+        throw new SecurityError('Invalid transaction ID format', 'INVALID_TRANSACTION_ID');
+      }
+    } else if (toolName.includes('device')) {
+      if (!args.deviceId && !args.device_id) {
+        throw new SecurityError('Device ID is required', 'MISSING_DEVICE_ID');
+      }
+      const deviceId = args.deviceId || args.device_id;
+      if (!deviceId.startsWith('dev_')) {
+        throw new SecurityError('Invalid device ID format', 'INVALID_DEVICE_ID');
+      }
+    }
+  }
+
+  /**
+   * Check if a tool is a static tool
+   */
+  private isStaticTool(toolName: string): boolean {
+    const staticTools = ['list_allowed_directories'];
+    return staticTools.includes(toolName);
+  }
+
+  /**
+   * Handle static tool execution
+   */
+  private async handleStaticTool(name: string, args: any): Promise<any> {
+    switch (name) {
+      case 'list_allowed_directories':
+        return this.handleListAllowedDirectories(args);
+      default:
+        throw new MCPError(`Unknown static tool: ${name}`);
+    }
+  }
+
+  /**
+   * Handle list_allowed_directories tool
+   */
+  private async handleListAllowedDirectories(_args: any): Promise<any> {
+    try {
+      // Get all available tool definitions to show capabilities
+      const dynamicTools = await this.getDynamicTools();
+      const staticTools = this.getStaticTools();
+      const allTools = [...staticTools, ...dynamicTools];
+
+      // Extract unique endpoints from tool names
+      const endpoints = new Set<string>();
+      
+      for (const tool of dynamicTools) {
+        // Extract endpoint from tool name (e.g., account_list -> accounts)
+        if (tool.name.includes('_list')) {
+          const resourceType = tool.name.replace('_list', '');
+          endpoints.add(`/${resourceType}s`);
+        } else if (tool.name.includes('_retrieve')) {
+          const resourceType = tool.name.replace('_retrieve', '');
+          endpoints.add(`/${resourceType}s/{id}`);
+        } else if (tool.name.includes('_create')) {
+          const resourceType = tool.name.replace('_create', '');
+          endpoints.add(`/${resourceType}s`);
+        }
+      }
+
+      return {
+        content: [
+          {
+            type: 'text' as const,
+            text: `📋 **Persona API MCP Server Capabilities**
+
+**Available Endpoints:**
+${Array.from(endpoints).sort().map(ep => `• ${ep}`).join('\n')}
+
+**Available Tools:** ${allTools.length}
+${allTools.slice(0, 10).map(t => `• ${t.name}: ${t.description.substring(0, 80)}...`).join('\n')}
+${allTools.length > 10 ? `\n... and ${allTools.length - 10} more tools` : ''}
+
+**Server Configuration:**
+• API URL: ${this.config.persona.apiUrl}
+• Version: ${this.config.server.version}
+• Environment: ${this.config.environment}
+
+Use individual tools to interact with specific API endpoints.`,
+          },
+        ],
+      };
+    } catch (error) {
+      logger.error('Failed to list allowed directories', error as Error);
+      throw new MCPError('Failed to retrieve server capabilities');
     }
   }
 
@@ -533,7 +664,7 @@ export class PersonaMCPServer {
    * Format standardized tool error response
    */
   private formatToolErrorResponse(error: Error): any {
-    let errorMessage = error.message;
+    const errorMessage = error.message;
     let errorCode = 'UNKNOWN_ERROR';
     let isSecurityError = false;
 

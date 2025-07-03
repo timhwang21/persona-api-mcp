@@ -2,7 +2,7 @@
  * Tests for Configuration module
  */
 
-import { describe, it, expect, beforeEach } from 'vitest';
+import { describe, it, expect } from 'vitest';
 
 describe('Configuration', () => {
   it('should be testable', () => {

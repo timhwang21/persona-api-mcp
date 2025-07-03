@@ -1,0 +1,44 @@
+apiTags:
+  - AAMVA Verifications
+  - API Keys
+  - API Logs
+  - Accounts
+  - Cases
+  - Database Business Verifications
+  - Database Standard Verifications
+  - Database Verifications
+  - Devices
+  - Document Verifications
+  - Documents
+  - Email Address Verifications
+  - Events
+  - Government ID Verifications
+  - Graph
+  - Importers
+  - Inquiries
+  - Inquiry Sessions
+  - Inquiry Templates
+  - List Items
+  - Lists
+  - OAuth
+  - Phone Carrier Database Verifications
+  - Phone Number Verifications
+  - Reports
+  - Selfie Verifications
+  - Serpro Database Verifications
+  - Suspicious Activity Reports
+  - TIN Database Verifications
+  - Transaction Types
+  - Transactions
+  - User Audit Logs
+  - Verifications
+  - Webhooks
+  - Workflows
+  - eCBSV Database Verifications
+metadata:
+  generatedAt: '2025-07-03T15:26:28.468Z'
+  generatedBy: scripts/extract-tags.js
+  totalTags: 36
+  sourceFiles:
+    main: openapi/openapi.yaml
+    additional: 0

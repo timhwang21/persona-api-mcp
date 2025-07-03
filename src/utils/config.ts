@@ -37,12 +37,6 @@ const ConfigSchema = z.object({
     description: z.string().default('MCP server for Persona API integration'),
   }),
 
-  // Caching Configuration
-  cache: z.object({
-    ttl: z.number().positive().default(300), // 5 minutes
-    maxSize: z.number().positive().default(1000), // Max cached items
-    enabled: z.boolean().default(true),
-  }),
 
   // Logging Configuration
   logging: z.object({
@@ -73,11 +67,6 @@ export function loadConfig(): Config {
       name: process.env.MCP_SERVER_NAME,
       version: process.env.MCP_SERVER_VERSION,
       description: process.env.MCP_SERVER_DESCRIPTION,
-    },
-    cache: {
-      ttl: process.env.CACHE_TTL ? parseInt(process.env.CACHE_TTL, 10) : undefined,
-      maxSize: process.env.CACHE_MAX_SIZE ? parseInt(process.env.CACHE_MAX_SIZE, 10) : undefined,
-      enabled: process.env.CACHE_ENABLED ? process.env.CACHE_ENABLED === 'true' : undefined,
     },
     logging: {
       level: process.env.LOG_LEVEL as 'debug' | 'info' | 'warn' | 'error' | undefined,

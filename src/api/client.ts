@@ -3,22 +3,18 @@
  * 
  * This module provides a comprehensive HTTP client for interacting with
  * Persona's REST API with authentication, retry logic, and error handling.
+ * 
+ * IMPORTANT: This client is designed to be parameterized and work with
+ * YAML-derived endpoints rather than having redundant methods for each resource.
  */
 
 import axios, { AxiosInstance, AxiosRequestConfig, AxiosResponse } from 'axios';
 import { getConfig } from '../utils/config.js';
 import { logger, createTimer } from '../utils/logger.js';
-import { PersonaAPIError, retryWithBackoff, handleError } from '../utils/errors.js';
+import { PersonaAPIError, retryWithBackoff } from '../utils/errors.js';
 import {
-  APIResponse,
-  APIErrorResponse,
-  Inquiry,
-  CreateInquiryRequest,
-  UpdateInquiryRequest,
   QueryParams,
-  PersonaHeaders,
   HTTPMethod,
-  OneTimeLinkResponse,
   isAPIErrorResponse,
 } from './types.js';
 
@@ -52,20 +48,22 @@ export class PersonaAPIClient {
   }
 
   /**
-   * Setup request and response interceptors
+   * Setup request/response interceptors for logging and error handling
    */
   private setupInterceptors(): void {
-    // Request interceptor for logging
+    // Request interceptor
     this.axiosInstance.interceptors.request.use(
       (config) => {
-        logger.logRequest(
-          config.method?.toUpperCase() || 'GET',
-          config.url || '',
-          {
-            params: config.params,
-            hasData: !!config.data,
-          }
-        );
+        const timer = createTimer('api_request');
+        (config as any).metadata = { timer };
+        
+        logger.info('API Request', {
+          method: config.method?.toUpperCase(),
+          url: config.url,
+          baseURL: config.baseURL,
+          headers: this.sanitizeHeaders(config.headers as Record<string, any>),
+        });
+        
         return config;
       },
       (error) => {
@@ -74,118 +72,108 @@ export class PersonaAPIClient {
       }
     );
 
-    // Response interceptor for logging and error handling
+    // Response interceptor
     this.axiosInstance.interceptors.response.use(
       (response) => {
-        const duration = Date.now() - (response.config as any).startTime;
-        logger.logResponse(
-          response.config.method?.toUpperCase() || 'GET',
-          response.config.url || '',
-          response.status,
+        const timer = (response.config as any).metadata?.timer;
+        const duration = timer?.end({ success: true });
+        
+        logger.info('API Response', {
+          status: response.status,
+          method: response.config.method?.toUpperCase(),
+          url: response.config.url,
           duration,
-          {
-            size: JSON.stringify(response.data).length,
-          }
-        );
+          dataSize: JSON.stringify(response.data).length,
+        });
+        
         return response;
       },
       (error) => {
-        const duration = Date.now() - (error.config as any).startTime;
-        logger.logResponse(
-          error.config?.method?.toUpperCase() || 'GET',
-          error.config?.url || '',
-          error.response?.status || 0,
-          duration,
-          {
-            errorType: error.constructor.name,
-          }
-        );
-
-        // Convert axios errors to PersonaAPIError
-        if (error.response) {
-          throw PersonaAPIError.fromAxiosError(error);
-        }
+        const timer = (error.config as any)?.metadata?.timer;
+        const duration = timer?.end({ success: false });
         
-        // Network or timeout errors
-        throw new PersonaAPIError(
-          error.message || 'Network error',
-          500,
-          undefined,
-          undefined,
-          {
-            code: error.code,
-            timeout: error.code === 'ECONNABORTED',
-          }
-        );
+        logger.error('API Error Response', error as Error, {
+          status: error.response?.status,
+          method: error.config?.method?.toUpperCase(),
+          url: error.config?.url,
+          duration,
+          errorData: error.response?.data,
+        });
+        
+        // Transform axios error to PersonaAPIError
+        throw this.transformError(error);
       }
     );
   }
 
   /**
-   * Make a raw API request with retry logic
+   * Sanitize headers for logging (remove sensitive information)
    */
-  private async makeRequest<T>(config: AxiosRequestConfig): Promise<T> {
-    const timer = createTimer(`API ${config.method?.toUpperCase()} ${config.url}`);
-    
-    // Add start time for duration calculation
-    (config as any).startTime = Date.now();
+  private sanitizeHeaders(headers: Record<string, any>): Record<string, any> {
+    const sanitized = { ...headers };
+    if (sanitized.Authorization) {
+      sanitized.Authorization = 'Bearer [REDACTED]';
+    }
+    return sanitized;
+  }
 
-    try {
-      const response = await retryWithBackoff(
-        () => this.axiosInstance.request<T>(config),
-        this.config.persona.retries,
-        this.config.persona.retryDelay
+  /**
+   * Transform axios error to PersonaAPIError
+   */
+  private transformError(error: any): PersonaAPIError {
+    if (error.response) {
+      // Server responded with error status
+      const { status, data } = error.response;
+      
+      if (isAPIErrorResponse(data)) {
+        return new PersonaAPIError(
+          data.errors[0]?.detail || `HTTP ${status} Error`,
+          Number(status),
+          Number(status),
+          data.errors[0]?.code
+        );
+      } else {
+        return new PersonaAPIError(
+          `HTTP ${status} Error: ${data?.message || error.message}`,
+          Number(status),
+          Number(status)
+        );
+      }
+    } else if (error.request) {
+      // Request was made but no response received
+      return new PersonaAPIError(
+        'Network error: No response received from server',
+        0,
+        0,
+        'NETWORK_ERROR'
       );
-
-      timer.end({ success: true, status: response.status });
-      return response.data;
-    } catch (error) {
-      timer.end({ success: false });
-      handleError(error as Error, { method: config.method, url: config.url });
-      throw error;
+    } else {
+      // Something else happened
+      return new PersonaAPIError(
+        `Request error: ${error.message}`,
+        0,
+        0,
+        'REQUEST_ERROR'
+      );
     }
   }
 
   /**
-   * Build query string from parameters
+   * Build query parameters from object
    */
-  private buildQueryParams(params: QueryParams = {}): Record<string, string> {
+  private buildQueryParams(params: QueryParams): Record<string, string> {
     const queryParams: Record<string, string> = {};
-
-    // Handle pagination
-    if (params['page[size]']) {
-      queryParams['page[size]'] = params['page[size]'].toString();
-    }
-    if (params['page[after]']) {
-      queryParams['page[after]'] = params['page[after]'];
-    }
-    if (params['page[before]']) {
-      queryParams['page[before]'] = params['page[before]'];
-    }
-
-    // Handle includes
-    if (params.include && params.include.length > 0) {
-      queryParams.include = params.include.join(',');
-    }
-
-    // Handle field selection
-    if (params['fields[inquiry]'] && params['fields[inquiry]'].length > 0) {
-      queryParams['fields[inquiry]'] = params['fields[inquiry]'].join(',');
-    }
-
-    // Handle filters
-    if (params.filter) {
-      Object.entries(params.filter).forEach(([key, value]) => {
-        if (value !== undefined && value !== null) {
-          if (Array.isArray(value)) {
-            queryParams[`filter[${key}]`] = value.join(',');
-          } else {
-            queryParams[`filter[${key}]`] = value.toString();
-          }
+    
+    Object.entries(params).forEach(([key, value]) => {
+      if (value !== undefined && value !== null) {
+        if (Array.isArray(value)) {
+          queryParams[key] = value.join(',');
+        } else {
+          queryParams[key] = String(value);
         }
-      });
-    }
-
+      }
+    });
+    
     return queryParams;
   }
 
@@ -193,210 +181,159 @@ export class PersonaAPIClient {
    * Generate idempotency key for requests
    */
   private generateIdempotencyKey(): string {
-    return `mcp-${Date.now()}-${Math.random().toString(36).substring(2)}`;
-  }
-
-  // Inquiry API Methods
-
-  /**
-   * List all inquiries
-   */
-  async listInquiries(params: QueryParams = {}): Promise<APIResponse<Inquiry[]>> {
-    const queryParams = this.buildQueryParams(params);
-    
-    return this.makeRequest<APIResponse<Inquiry[]>>({
-      method: 'GET',
-      url: '/inquiries',
-      params: queryParams,
-    });
+    return `${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
   }
 
   /**
-   * Create a new inquiry
+   * Generic method to make API requests
+   * This is the core method that all other operations should use
    */
-  async createInquiry(
-    request: CreateInquiryRequest,
-    idempotencyKey?: string
-  ): Promise<APIResponse<Inquiry>> {
-    const headers: Record<string, string> = {};
+  async makeRequest<T = any>(config: {
+    method: HTTPMethod;
+    url: string;
+    data?: any;
+    params?: QueryParams;
+    headers?: Record<string, string>;
+    timeout?: number;
+  }): Promise<T> {
+    const requestConfig: AxiosRequestConfig = {
+      method: config.method,
+      url: config.url,
+    };
     
-    if (idempotencyKey) {
-      headers['Idempotency-Key'] = idempotencyKey;
-    } else {
-      headers['Idempotency-Key'] = this.generateIdempotencyKey();
+    if (config.data !== undefined) {
+      requestConfig.data = config.data;
+    }
+    
+    if (config.params) {
+      requestConfig.params = this.buildQueryParams(config.params);
+    }
+    
+    if (config.headers) {
+      requestConfig.headers = config.headers;
+    }
+    
+    if (config.timeout !== undefined) {
+      requestConfig.timeout = config.timeout;
     }
 
-    return this.makeRequest<APIResponse<Inquiry>>({
-      method: 'POST',
-      url: '/inquiries',
-      data: request,
-      headers,
-    });
+    return retryWithBackoff(
+      async () => {
+        const response: AxiosResponse<T> = await this.axiosInstance.request(requestConfig);
+        return response.data;
+      },
+      this.config.persona.retries,
+      1000,
+      10000
+    );
   }
 
   /**
-   * Retrieve an inquiry by ID
+   * Generic GET request
    */
-  async getInquiry(
-    inquiryId: string,
-    params: Pick<QueryParams, 'include' | 'fields[inquiry]'> = {}
-  ): Promise<APIResponse<Inquiry>> {
-    const queryParams = this.buildQueryParams(params);
-    
-    return this.makeRequest<APIResponse<Inquiry>>({
+  async get<T = any>(url: string, params?: QueryParams, headers?: Record<string, string>): Promise<T> {
+    const config: any = {
       method: 'GET',
-      url: `/inquiries/${inquiryId}`,
-      params: queryParams,
-    });
+      url,
+    };
+    
+    if (params) config.params = params;
+    if (headers) config.headers = headers;
+    
+    return this.makeRequest<T>(config);
   }
 
   /**
-   * Update an inquiry
+   * Generic POST request
    */
-  async updateInquiry(
-    inquiryId: string,
-    request: UpdateInquiryRequest,
-    params: Pick<QueryParams, 'include' | 'fields[inquiry]'> = {}
-  ): Promise<APIResponse<Inquiry>> {
-    const queryParams = this.buildQueryParams(params);
+  async post<T = any>(
+    url: string, 
+    data?: any, 
+    params?: QueryParams, 
+    headers?: Record<string, string>,
+    idempotencyKey?: string
+  ): Promise<T> {
+    const requestHeaders = { ...headers };
+    if (idempotencyKey) {
+      requestHeaders['Idempotency-Key'] = idempotencyKey;
+    } else if (data) {
+      // Generate idempotency key for data-modifying operations
+      requestHeaders['Idempotency-Key'] = this.generateIdempotencyKey();
+    }
+
+    const config: any = {
+      method: 'POST',
+      url,
+      headers: requestHeaders,
+    };
     
-    return this.makeRequest<APIResponse<Inquiry>>({
+    if (data !== undefined) config.data = data;
+    if (params) config.params = params;
+
+    return this.makeRequest<T>(config);
+  }
+
+  /**
+   * Generic PATCH request
+   */
+  async patch<T = any>(
+    url: string, 
+    data: any, 
+    params?: QueryParams, 
+    headers?: Record<string, string>,
+    idempotencyKey?: string
+  ): Promise<T> {
+    const requestHeaders = { ...headers };
+    if (idempotencyKey) {
+      requestHeaders['Idempotency-Key'] = idempotencyKey;
+    }
+
+    const config: any = {
       method: 'PATCH',
-      url: `/inquiries/${inquiryId}`,
-      data: request,
-      params: queryParams,
-    });
-  }
-
-  /**
-   * Redact an inquiry (delete PII)
-   */
-  async redactInquiry(
-    inquiryId: string,
-    params: Pick<QueryParams, 'include' | 'fields[inquiry]'> = {}
-  ): Promise<APIResponse<Inquiry>> {
-    const queryParams = this.buildQueryParams(params);
+      url,
+      data,
+      headers: requestHeaders,
+    };
     
-    return this.makeRequest<APIResponse<Inquiry>>({
+    if (params) config.params = params;
+
+    return this.makeRequest<T>(config);
+  }
+
+  /**
+   * Generic PUT request
+   */
+  async put<T = any>(
+    url: string, 
+    data: any, 
+    params?: QueryParams, 
+    headers?: Record<string, string>
+  ): Promise<T> {
+    const config: any = {
+      method: 'PUT',
+      url,
+      data,
+    };
+    
+    if (params) config.params = params;
+    if (headers) config.headers = headers;
+
+    return this.makeRequest<T>(config);
+  }
+
+  /**
+   * Generic DELETE request
+   */
+  async delete<T = any>(url: string, params?: QueryParams, headers?: Record<string, string>): Promise<T> {
+    const config: any = {
       method: 'DELETE',
-      url: `/inquiries/${inquiryId}`,
-      params: queryParams,
-    });
-  }
+      url,
+    };
+    
+    if (params) config.params = params;
+    if (headers) config.headers = headers;
 
-  /**
-   * Approve an inquiry
-   */
-  async approveInquiry(inquiryId: string): Promise<APIResponse<Inquiry>> {
-    return this.makeRequest<APIResponse<Inquiry>>({
-      method: 'POST',
-      url: `/inquiries/${inquiryId}/approve`,
-    });
-  }
-
-  /**
-   * Decline an inquiry
-   */
-  async declineInquiry(inquiryId: string): Promise<APIResponse<Inquiry>> {
-    return this.makeRequest<APIResponse<Inquiry>>({
-      method: 'POST',
-      url: `/inquiries/${inquiryId}/decline`,
-    });
-  }
-
-  /**
-   * Mark inquiry for review
-   */
-  async markInquiryForReview(inquiryId: string): Promise<APIResponse<Inquiry>> {
-    return this.makeRequest<APIResponse<Inquiry>>({
-      method: 'POST',
-      url: `/inquiries/${inquiryId}/mark-for-review`,
-    });
-  }
-
-  /**
-   * Expire an inquiry
-   */
-  async expireInquiry(inquiryId: string): Promise<APIResponse<Inquiry>> {
-    return this.makeRequest<APIResponse<Inquiry>>({
-      method: 'POST',
-      url: `/inquiries/${inquiryId}/expire`,
-    });
-  }
-
-  /**
-   * Resume an inquiry
-   */
-  async resumeInquiry(inquiryId: string): Promise<APIResponse<Inquiry>> {
-    return this.makeRequest<APIResponse<Inquiry>>({
-      method: 'POST',
-      url: `/inquiries/${inquiryId}/resume`,
-    });
-  }
-
-  /**
-   * Generate one-time link for inquiry
-   */
-  async generateInquiryOneTimeLink(inquiryId: string): Promise<OneTimeLinkResponse> {
-    return this.makeRequest<OneTimeLinkResponse>({
-      method: 'POST',
-      url: `/inquiries/${inquiryId}/generate-one-time-link`,
-    });
-  }
-
-  /**
-   * Add tag to inquiry
-   */
-  async addInquiryTag(inquiryId: string, tag: string): Promise<APIResponse<Inquiry>> {
-    return this.makeRequest<APIResponse<Inquiry>>({
-      method: 'POST',
-      url: `/inquiries/${inquiryId}/add-tag`,
-      data: {
-        meta: {
-          tag_name: tag,
-        },
-      },
-    });
-  }
-
-  /**
-   * Remove tag from inquiry
-   */
-  async removeInquiryTag(inquiryId: string, tag: string): Promise<APIResponse<Inquiry>> {
-    return this.makeRequest<APIResponse<Inquiry>>({
-      method: 'POST',
-      url: `/inquiries/${inquiryId}/remove-tag`,
-      data: {
-        meta: {
-          tag_name: tag,
-        },
-      },
-    });
-  }
-
-  /**
-   * Set all tags for inquiry
-   */
-  async setInquiryTags(inquiryId: string, tags: string[]): Promise<APIResponse<Inquiry>> {
-    return this.makeRequest<APIResponse<Inquiry>>({
-      method: 'POST',
-      url: `/inquiries/${inquiryId}/set-tags`,
-      data: {
-        meta: {
-          tag_names: tags,
-        },
-      },
-    });
-  }
-
-  /**
-   * Print inquiry
-   */
-  async printInquiry(inquiryId: string): Promise<APIResponse<Inquiry>> {
-    return this.makeRequest<APIResponse<Inquiry>>({
-      method: 'POST',
-      url: `/inquiries/${inquiryId}/print`,
-    });
+    return this.makeRequest<T>(config);
   }
 
   /**
@@ -404,8 +341,8 @@ export class PersonaAPIClient {
    */
   async healthCheck(): Promise<{ status: 'ok'; timestamp: string }> {
     try {
-      // Try to list inquiries with minimal data to check API connectivity
-      await this.listInquiries({ 'page[size]': 1 });
+      // Try a simple GET request to check API connectivity
+      await this.get('/inquiries', { 'page[size]': 1 });
       return {
         status: 'ok',
         timestamp: new Date().toISOString(),
@@ -415,6 +352,7 @@ export class PersonaAPIClient {
       throw error;
     }
   }
+
 }
 
 /**

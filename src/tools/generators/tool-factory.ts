@@ -9,7 +9,7 @@ import { z } from 'zod';
 import { zodToJsonSchema } from 'zod-to-json-schema';
 import { openAPIParser, ParsedAPI, ParsedOperation, ParsedSchema, ParsedParameter } from './openapi-parser.js';
 import { personaAPI } from '../../api/client.js';
-import { CreateInquiryRequest } from '../../api/types.js';
+import { CreateRequest } from '../../api/types.js';
 import { resourceManager } from '../../resources/manager.js';
 import { logger, createTimer } from '../../utils/logger.js';
 import { handleError, ValidationError } from '../../utils/errors.js';
@@ -52,7 +52,6 @@ export interface GeneratedTool {
 export interface ToolGenerationOptions {
   includeOptionalParams?: boolean;
   validateResponses?: boolean;
-  cacheResponses?: boolean;
   includeExamples?: boolean;
 }
 
@@ -145,8 +144,8 @@ export class ToolFactory {
    */
   private generateToolName(operationId: string, method: string): string {
     // Convert operation ID to a more MCP-friendly format
-    // e.g., "list-all-inquiries" -> "inquiry_list"
-    // e.g., "create-an-inquiry" -> "inquiry_create"
+    // e.g., "list-all-accounts" -> "account_list"
+    // e.g., "create-a-case" -> "case_create"
     
     let name = operationId.toLowerCase();
     
@@ -184,12 +183,18 @@ export class ToolFactory {
       let zodSchema = this.convertSchemaToZod(param.schema);
       
       // Add security validation for known ID parameters
-      if (param.name.includes('inquiry') && param.name.includes('id')) {
-        zodSchema = SecuritySchemas.inquiryId;
-      } else if (param.name.includes('template') && param.name.includes('id')) {
-        zodSchema = SecuritySchemas.inquiryTemplateId;
-      } else if (param.name.includes('account') && param.name.includes('id')) {
-        zodSchema = SecuritySchemas.accountId;
+      // Use universal ID validation patterns instead of hardcoded resource types
+      if (param.name.includes('id')) {
+        if (param.name.includes('inquiry') && !param.name.includes('template')) {
+          zodSchema = SecuritySchemas.inquiryId;
+        } else if (param.name.includes('template')) {
+          zodSchema = SecuritySchemas.inquiryTemplateId;
+        } else if (param.name.includes('account')) {
+          zodSchema = SecuritySchemas.accountId;
+        } else {
+          // Generic ID validation for other resource types
+          zodSchema = z.string().min(1).max(100).regex(/^[a-z]{2,}_[a-zA-Z0-9_-]+$/, 'Invalid resource ID format');
+        }
       }
       
       schemaProperties[paramName] = zodSchema.describe(
@@ -405,11 +410,6 @@ export class ToolFactory {
         // Step 4: Execute API request with retries and validation
         const response = await this.executeAPIRequestWithValidation(apiRequest);
 
-        // Step 5: Cache response if configured (atomic operation)
-        if (options.cacheResponses && this.shouldCacheResponse(operation, response)) {
-          await this.cacheResponseAtomic(operation, input, response);
-        }
-
         const duration = timer.end({ success: true });
 
         logger.info(`Tool executed successfully: ${operation.operationId}`, {
@@ -455,7 +455,7 @@ export class ToolFactory {
       throw new SecurityError('Input contains null bytes', 'INVALID_INPUT');
     }
 
-    // Validate specific ID parameters
+    // Validate specific ID parameters using universal patterns
     for (const [key, value] of Object.entries(input)) {
       if (typeof value === 'string') {
         if (key.includes('inquiryId') || key.includes('inquiry_id')) {
@@ -465,6 +465,11 @@ export class ToolFactory {
         } else if (key.includes('templateId') || key.includes('template_id')) {
           if (!SecurityValidator.validateInquiryTemplateId(value)) {
             throw new SecurityError(`Invalid template ID format: ${key}`, 'INVALID_ID');
+          }
+        } else if (key.toLowerCase().includes('id') && key !== 'id') {
+          // Universal ID validation for other resource types
+          if (!this.validateUniversalId(value)) {
+            throw new SecurityError(`Invalid ID format: ${key}`, 'INVALID_ID');
           }
         } else if (key.includes('accountId') || key.includes('account_id')) {
           if (!SecurityValidator.validateAccountId(value)) {
@@ -513,32 +518,6 @@ export class ToolFactory {
     }
   }
 
-  /**
-   * Cache response using atomic operations to prevent race conditions
-   */
-  private async cacheResponseAtomic(
-    operation: ParsedOperation,
-    input: Record<string, unknown>,
-    response: APIResponse
-  ): Promise<void> {
-    try {
-      if (operation.operationId.includes('inquiry')) {
-        if (response.data && typeof response.data === 'object') {
-          const data = response.data as any;
-          if (data.id) {
-            // Use atomic caching operation
-            await resourceManager.cacheResource('inquiry', data.id, response);
-          }
-        }
-      }
-    } catch (error) {
-      // Don't fail the operation if caching fails
-      logger.warn('Failed to cache response', {
-        error: (error as Error).message,
-        operationId: operation.operationId,
-      });
-    }
-  }
 
   /**
    * Format standardized error response
@@ -620,61 +599,127 @@ Please check your input parameters and try again. If the error persists, contact
 
   /**
    * Execute API request using the persona API client
+   * Universal method that works with ANY endpoint from the OpenAPI specification
    */
   private async executeAPIRequest(request: APIRequest): Promise<APIResponse> {
-    // For now, we'll use the existing personaAPI client methods
-    // This is a simplified mapping - in a real implementation,
-    // we'd need to properly route to the correct API client method
+    // Universal implementation that works with all OpenAPI endpoints
+    // No hardcoded endpoints - follows YAML-first philosophy
     
-    if (request.url === '/inquiries' && request.method === 'GET') {
-      return await personaAPI.listInquiries(request.params || {});
-    } else if (request.url === '/inquiries' && request.method === 'POST') {
-      const inquiryData = request.data || {};
-      const createRequest: CreateInquiryRequest = {
-        data: {
-          attributes: inquiryData as any,
-        },
-      };
-      return await personaAPI.createInquiry(createRequest);
-    } else if (request.url.startsWith('/inquiries/') && request.method === 'GET') {
-      const inquiryId = request.url.split('/')[2];
-      if (!inquiryId) {
-        throw new Error('Invalid inquiry ID');
-      }
-      return await personaAPI.getInquiry(inquiryId, request.params || {});
+    switch (request.method) {
+      case 'GET':
+        return await personaAPI.get(request.url, request.params);
+        
+      case 'POST':
+        // Format data according to Persona API conventions if present
+        const postData = request.data ? {
+          data: {
+            type: this.inferResourceType(request.url),
+            attributes: request.data,
+          },
+        } : request.data;
+        return await personaAPI.post(request.url, postData, request.params);
+        
+      case 'PATCH':
+        const patchData = request.data ? {
+          data: {
+            type: this.inferResourceType(request.url),
+            attributes: request.data,
+          },
+        } : request.data;
+        return await personaAPI.patch(request.url, patchData, request.params);
+        
+      case 'PUT':
+        return await personaAPI.put(request.url, request.data, request.params);
+        
+      case 'DELETE':
+        return await personaAPI.delete(request.url, request.params);
+        
+      default:
+        throw new Error(`Unsupported HTTP method: ${request.method}`);
     }
-    
-    // Fallback: throw error for unsupported operations
-    throw new Error(`Unsupported API operation: ${request.method} ${request.url}`);
   }
 
   /**
-   * Determine if response should be cached
+   * Infer resource type from URL path for request data formatting
+   * This follows OpenAPI path patterns without hardcoding specific endpoints
    */
-  private shouldCacheResponse(operation: ParsedOperation, response: any): boolean {
-    // Cache GET requests and successful responses
-    return operation.operationId.includes('list') || 
-           operation.operationId.includes('retrieve') ||
-           operation.operationId.includes('get');
-  }
-
-  /**
-   * Cache API response
-   */
-  private cacheResponse(operation: ParsedOperation, input: any, response: any): void {
-    try {
-      if (operation.operationId.includes('inquiry')) {
-        if (response.data?.id) {
-          resourceManager.cacheResource('inquiry', response.data.id, response);
+  private inferResourceType(url: string): string | undefined {
+    // Extract resource type from URL path (e.g., '/accounts' -> 'account')
+    const pathSegments = url.split('/').filter(segment => segment && !segment.match(/^[a-f0-9-]{36}$/));
+    if (pathSegments.length > 0) {
+      const resourcePath = pathSegments[0];
+      if (resourcePath) {
+        // Convert plural to singular with proper rules
+        if (resourcePath === 'inquiries') {
+          return 'inquiry';
+        } else if (resourcePath === 'verifications') {
+          return 'verification';
+        } else if (resourcePath === 'transactions') {
+          return 'transaction';
+        } else if (resourcePath.endsWith('ies')) {
+          // Handle words ending in 'ies' (e.g., 'companies' -> 'company')
+          return resourcePath.slice(0, -3) + 'y';
+        } else if (resourcePath.endsWith('s')) {
+          // Basic plural removal
+          return resourcePath.slice(0, -1);
+        } else {
+          return resourcePath;
         }
       }
-    } catch (error) {
-      logger.warn('Failed to cache response', {
-        error: (error as Error).message,
-        operationId: operation.operationId,
-      });
     }
+    return undefined;
   }
+
+  /**
+   * Universal ID validation for any resource type
+   * Follows Persona API ID patterns (e.g., 'res_123abc', 'acc_456def')
+   */
+  private validateUniversalId(id: string): boolean {
+    // Basic Persona API ID pattern: 3+ lowercase letters, underscore, alphanumeric
+    return /^[a-z]{2,}_[a-zA-Z0-9_-]+$/.test(id) && id.length >= 5 && id.length <= 100;
+  }
+
+  /**
+   * Infer resource type from operation for caching purposes
+   * Uses operation tags and operation ID to determine resource type
+   */
+  private inferResourceTypeFromOperation(operation: ParsedOperation): string | undefined {
+    // First try to get from operation tags
+    if (operation.tags && operation.tags.length > 0) {
+      const tag = operation.tags[0]?.toLowerCase();
+      
+      // Map tags to resource types
+      if (tag && tag.includes('inquir')) return 'inquiry';
+      if (tag && tag.includes('account')) return 'account';
+      if (tag && tag.includes('case')) return 'case';
+      if (tag && tag.includes('verification')) return 'verification';
+      if (tag && tag.includes('report')) return 'report';
+      if (tag && tag.includes('transaction')) return 'transaction';
+      if (tag && tag.includes('device')) return 'device';
+      if (tag && tag.includes('document')) return 'document';
+      if (tag && tag.includes('webhook')) return 'webhook';
+    }
+
+    // Fallback: try to infer from operation ID
+    if (operation.operationId) {
+      const operationId = operation.operationId.toLowerCase();
+      
+      // Common resource patterns in operation IDs
+      const resourcePatterns = [
+        'inquiry', 'account', 'case', 'verification', 'report', 'transaction', 
+        'device', 'document', 'webhook', 'template'
+      ];
+      
+      for (const pattern of resourcePatterns) {
+        if (operationId.includes(pattern)) {
+          return pattern;
+        }
+      }
+    }
+
+    return undefined;
+  }
+
 
   /**
    * Format tool response for MCP

@@ -166,17 +166,6 @@ export class RateLimitError extends AppError {
   }
 }
 
-/**
- * Cache-related errors
- */
-export class CacheError extends AppError {
-  readonly code = 'CACHE_ERROR';
-  readonly statusCode = 500;
-
-  constructor(message: string, context?: Record<string, unknown>) {
-    super(`Cache error: ${message}`, context);
-  }
-}
 
 /**
  * MCP protocol errors
